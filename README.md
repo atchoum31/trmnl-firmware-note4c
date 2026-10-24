@@ -68,7 +68,7 @@ To go back, write your backup at `0x0` the same way.
 
 ## Setup for a fork
 
-A maintainer must add the repository secret `CLAUDE_CODE_OAUTH_TOKEN` (Settings, Secrets and variables, Actions). Create the token with `claude setup-token`. Without it, the workflow still builds when the patches apply cleanly. It fails at the Claude step when a conflict needs resolving.
+A maintainer must add the repository secret `CLAUDE_CODE_OAUTH_TOKEN` (Settings, Secrets and variables, Actions). Create the token with `claude setup-token`, and paste it from an interactive terminal or the web UI: a non-interactive shell stores an empty value. Then run the `check-secret` workflow, which reports whether the secret is set without showing it. Without it, the workflow still builds when the patches apply cleanly. It fails at the Claude step when a conflict needs resolving.
 
 To run the scripts on your machine, see the header of `scripts/build.sh`. For example, this applies the patches on an upstream tag and stops at the first conflict:
 

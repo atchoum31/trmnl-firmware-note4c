@@ -64,6 +64,33 @@ resolved_before() {
     grep -q '^Resolved-by: claude$'
 }
 
+# Append the staged change list of a Claude round to the run summary. The text
+# comes from git, never from Claude.
+summarize_round() {
+  local title=$1
+  [[ -n ${GITHUB_STEP_SUMMARY:-} ]] || return 0
+  {
+    echo "### $title"
+    echo '```'
+    fwgit diff --cached --stat HEAD
+    echo '```'
+  } >>"$GITHUB_STEP_SUMMARY"
+}
+
+# Paths that upstream deleted or moved while the patch modified them (git
+# status DU). They have no conflict marker, so "git add -A" would bring them
+# back silently.
+check_upstream_deletions() {
+  local f p left=()
+  f=$FW/.ci/deleted-upstream.txt
+  [[ -s $f ]] || return 0
+  while IFS= read -r p; do
+    [[ -e $FW/$p ]] && left+=("$p")
+  done <"$f"
+  [[ ${#left[@]} -eq 0 ]] ||
+    die "upstream removed ${left[*]}: port the changes to the new location and git rm the old path"
+}
+
 am_running() {
   [[ -d $FW/.git/rebase-apply ]]
 }
@@ -150,7 +177,9 @@ cmd_apply() {
       echo "$bad" >&2
       exit 1
     fi
+    check_upstream_deletions
     fwgit add -A
+    summarize_round "Conflict round: $(<"$FW/.ci/patch-name")"
     out=$(GIT_EDITOR=true fwgit am --continue 2>&1) || rc=$?
     touch "$FW/.ci/resolved"
   else
@@ -171,6 +200,7 @@ cmd_apply() {
     exit 1
   fi
   printf '%s\n' "$files" >"$FW/.ci/conflicts.txt"
+  fwgit status --porcelain | sed -n 's/^DU //p' >"$FW/.ci/deleted-upstream.txt"
   local n name
   n=$(<"$FW/.git/rebase-apply/next")
   name=$(find "$OURS/patches" -name '*.patch' | sort | sed -n "${n}p")
@@ -240,6 +270,7 @@ cmd_amend() {
   bad=$(marker_files)
   [[ -z $bad ]] || die "conflict markers in: $bad"
   fwgit add -A
+  summarize_round "Build fix"
   fwgit commit --quiet --amend --no-edit
   echo "amended HEAD with the build fix"
 }
