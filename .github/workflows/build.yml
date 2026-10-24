@@ -1,0 +1,206 @@
+name: build
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Upstream tag to build (default is the latest upstream release)
+        required: false
+        default: ""
+      force:
+        description: Rebuild even if the release exists
+        type: boolean
+        default: false
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  OURS: ${{ github.workspace }}/ours
+  FW: ${{ github.workspace }}/fw
+  DIST: ${{ github.workspace }}/dist
+  REPO: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      skip: ${{ steps.resolve.outputs.skip }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: ours
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          FORCE: ${{ inputs.force }}
+        run: ours/scripts/build.sh resolve
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        if: env.SKIP != 'true'
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: env.SKIP != 'true'
+        with:
+          path: ~/.platformio
+          key: platformio-${{ steps.resolve.outputs.tag }}-${{ runner.os }}
+          restore-keys: platformio-
+
+      - name: Install PlatformIO
+        if: env.SKIP != 'true'
+        run: pip install platformio==6.1.18
+
+      - name: Prepare upstream checkout
+        if: env.SKIP != 'true'
+        run: ours/scripts/build.sh prepare
+
+      - name: Apply patches
+        id: a0
+        if: env.SKIP != 'true'
+        run: ours/scripts/build.sh apply
+
+      - name: Claude resolves conflicts (round 1)
+        id: c1
+        if: steps.a0.outputs.conflict == 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: ours/scripts/claude.sh resolve
+
+      - name: Apply patches (round 1)
+        id: a1
+        if: steps.a0.outputs.conflict == 'true'
+        run: ours/scripts/build.sh apply
+
+      - name: Claude resolves conflicts (round 2)
+        id: c2
+        if: steps.a1.outputs.conflict == 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: ours/scripts/claude.sh resolve
+
+      - name: Apply patches (round 2)
+        id: a2
+        if: steps.a1.outputs.conflict == 'true'
+        run: ours/scripts/build.sh apply
+
+      - name: Claude resolves conflicts (round 3)
+        id: c3
+        if: steps.a2.outputs.conflict == 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: ours/scripts/claude.sh resolve
+
+      - name: Apply patches (round 3)
+        id: a3
+        if: steps.a2.outputs.conflict == 'true'
+        run: ours/scripts/build.sh apply
+
+      - name: Claude resolves conflicts (round 4)
+        id: c4
+        if: steps.a3.outputs.conflict == 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: ours/scripts/claude.sh resolve
+
+      - name: Apply patches (round 4)
+        id: a4
+        if: steps.a3.outputs.conflict == 'true'
+        run: ours/scripts/build.sh apply
+
+      - name: Check all patches applied
+        if: env.SKIP != 'true'
+        run: ours/scripts/build.sh applied
+
+      - name: Generate patch series
+        if: env.SKIP != 'true'
+        run: ours/scripts/build.sh patches
+
+      - name: Build
+        id: build
+        if: env.SKIP != 'true'
+        run: ours/scripts/build.sh build first
+
+      - name: Claude fixes the build
+        if: steps.build.outputs.ok == 'false'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: ours/scripts/claude.sh fix
+
+      - name: Commit the build fix and rebuild
+        if: steps.build.outputs.ok == 'false'
+        run: |
+          ours/scripts/build.sh amend
+          ours/scripts/build.sh patches
+          ours/scripts/build.sh build final
+
+      - name: Collect release assets
+        if: env.SKIP != 'true'
+        run: ours/scripts/build.sh assets
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: env.SKIP != 'true'
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: needs.build.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: ours
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Commit patches and create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: ours/scripts/build.sh publish
+
+  notify:
+    needs: [build, publish]
+    if: failure()
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: ours
+          persist-credentials: false
+
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          RUN_ID: ${{ github.run_id }}
+        run: ours/scripts/build.sh issue
