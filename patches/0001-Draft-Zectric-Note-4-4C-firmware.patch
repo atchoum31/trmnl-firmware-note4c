@@ -1,0 +1,945 @@
+From 783c868bab1b3c94c24cc6c2cd01f9c12abe6ae7 Mon Sep 17 00:00:00 2001
+From: LitoMore <litomore@gmail.com>
+Date: Wed, 29 Jul 2026 00:37:06 +0800
+Subject: [PATCH 1/3] Draft Zectric Note 4/4C firmware
+
+---
+ .gitignore                            |   1 +
+ README.md                             |   6 +-
+ docs/zectrix.md                       | 117 ++++++++++++
+ include/config.h                      |  14 +-
+ include/zectrix.h                     |  13 ++
+ platformio.ini                        |  41 ++++
+ scripts/extra/post_build_zectrix.py   |  38 ++++
+ sdkconfigs/sdkconfig.defaults.zectrix |  23 +++
+ src/DEV_Config.h                      |  11 ++
+ src/bl.cpp                            |  11 ++
+ src/display.cpp                       | 262 +++++++++++++++++++++++++-
+ src/firmware_update.cpp               |   4 +
+ src/main.cpp                          |   8 +
+ src/power.cpp                         |  10 +
+ src/zectrix.cpp                       |  47 +++++
+ 15 files changed, 596 insertions(+), 10 deletions(-)
+ create mode 100644 docs/zectrix.md
+ create mode 100644 include/zectrix.h
+ create mode 100644 scripts/extra/post_build_zectrix.py
+ create mode 100644 sdkconfigs/sdkconfig.defaults.zectrix
+ create mode 100644 src/zectrix.cpp
+
+diff --git a/.gitignore b/.gitignore
+index 0ef39e0..dd55251 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,6 +1,7 @@
+ .DS_Store
+ .pio
+ /builds/*
++/backups/
+ .vscode/.browse.c_cpp.db*
+ .vscode/c_cpp_properties.json
+ .vscode/extensions.json
+diff --git a/README.md b/README.md
+index 2d80bf5..356e24c 100644
+--- a/README.md
++++ b/README.md
+@@ -7,6 +7,10 @@ created for the [TRMNL](https://trmnl.com) e-ink display.
+ >
+ > to access production-ready firmware, check out the [tagged releases](https://github.com/usetrmnl/trmnl-firmware/releases/)
+  or use the [Flash Assistant](https://trmnl.com/flash).
++
++Initial Zectrix Note 4 / Note 4C build and flashing notes are available in
++[docs/zectrix.md](docs/zectrix.md).
++
+ ## **Algorithm block scheme**
+ 
+ ```mermaid
+@@ -410,4 +414,4 @@ We use `clang-format` for formatting C/C++ source files. You can install it [via
+ Two ways to format files:
+ 
+ 1. Run `./scripts/format.sh` to format the entire repository.
+-2. VS Code users: install [the C/C++ extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) which will automatically format-on-save using clang-format.
+\ No newline at end of file
++2. VS Code users: install [the C/C++ extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) which will automatically format-on-save using clang-format.
+diff --git a/docs/zectrix.md b/docs/zectrix.md
+new file mode 100644
+index 0000000..7aec7fc
+--- /dev/null
++++ b/docs/zectrix.md
+@@ -0,0 +1,117 @@
++# Zectrix Note 4 / Note 4C
++
++This branch adds initial TRMNL firmware support for the ESP32-S3 N16R8
++versions of the Zectrix Note 4 and Note 4C.
++
++The two targets compile successfully, but the display and deep-sleep paths
++still need validation on physical devices. Back up the complete factory flash
++before installing either target.
++
++## Build targets
++
++| Device | PlatformIO environment | TRMNL model | Display profile |
++| --- | --- | --- | --- |
++| Note 4 | `zectrix_note4` | `zectrix_note4` | `EP42B_400x300` |
++| Note 4C | `zectrix_note4c` | `zectrix_note4c` | `EP42YR_400x300` |
++
++Build either image from the repository root:
++
++```sh
++pio run -e zectrix_note4
++pio run -e zectrix_note4c
++```
++
++Each build produces both a normal application image and a complete image that
++starts at flash offset `0x0`:
++
++```text
++.pio/build/zectrix_note4/firmware.bin
++.pio/build/zectrix_note4/merged_firmware.bin
++.pio/build/zectrix_note4c/firmware.bin
++.pio/build/zectrix_note4c/merged_firmware.bin
++```
++
++## Pin mapping
++
++| Function | GPIO | Notes |
++| --- | ---: | --- |
++| E-paper power | 6 | Active HIGH; held LOW in deep sleep |
++| E-paper busy | 8 | |
++| E-paper reset | 9 | |
++| E-paper D/C | 10 | |
++| E-paper CS | 11 | |
++| E-paper SCK | 12 | |
++| E-paper MOSI | 13 | |
++| Board power hold | 17 | Must remain HIGH, including during deep sleep |
++| Home / OK button | 0 | TRMNL action button and deep-sleep wake source |
++| Battery ADC | 4 | Firmware applies the board's 2:1 divider |
++| Charging | 2 | Active LOW |
++| Charge complete | 1 | Active HIGH |
++
++GPIO17 is safety-critical. If it is released or driven LOW after the physical
++power button is released, battery power to the ESP32-S3 is cut. The Zectrix
++startup code asserts it before the rest of firmware setup and holds it across
++deep sleep.
++
++## Back up and flash
++
++Put the device into its ESP32-S3 ROM download mode and identify its serial
++port. Before the first test, use an installed `esptool` to read all 16 MB:
++
++```sh
++esptool --chip esp32s3 --port PORT read-flash \
++  0x0 0x1000000 zectrix-original-16mb.bin
++```
++
++For development, let PlatformIO select all required offsets:
++
++```sh
++pio run -e zectrix_note4 -t upload --upload-port PORT
++```
++
++Use `zectrix_note4c` instead for a Note 4C.
++
++The generated merged image can also be written at offset `0x0`:
++
++```sh
++esptool --chip esp32s3 --port PORT write-flash \
++  0x0 .pio/build/zectrix_note4/merged_firmware.bin
++```
++
++Keep the physical power button pressed until the new firmware starts on the
++first boot. If the device powers off unexpectedly, reconnect USB or hold the
++power button, enter ROM download mode again, and restore the 16 MB backup.
++
++## First hardware validation
++
++Test one function at a time:
++
++1. Open a serial monitor at 115200 baud and confirm the firmware reaches
++   `bl_init()` without repeatedly rebooting.
++2. Confirm the e-paper power rail switches on and the first screen refresh
++   completes without a busy timeout.
++3. Complete the TRMNL Wi-Fi captive portal and request a 400x300 custom-screen
++   PNG.
++4. Confirm battery voltage and USB/charging state in the device logs.
++5. Let the device enter deep sleep. Verify that it remains powered, wakes on
++   its timer, and wakes when the Home / OK button on GPIO0 is pressed.
++6. Measure deep-sleep current after the e-paper rail on GPIO6 is disabled.
++
++Note 4C currently uses the four-color `EP42YR_400x300` profile provided by
++`bb_epaper` 2.1.9. It compiles and exercises TRMNL's four-color PNG decoder,
++but the controller/waveform must be confirmed against the panel fitted to the
++actual device batch. A refresh taking more than ten seconds is normal for this
++panel class. If the first refresh times out or produces incorrect colors,
++record the panel label and serial log before trying another driver.
++
++## Deliberate limitations
++
++- Upstream TRMNL OTA is disabled for these targets. An official OG/X image
++  could use incompatible pins and power behavior.
++- Factory QA is disabled because its fixtures and pin assumptions are for
++  official TRMNL hardware.
++- Only the Home / OK button is mapped into the current single-button TRMNL
++  interaction model. The remaining Note buttons can be added later.
++- Some built-in fallback BMPs and status layouts still assume the upstream
++  800x480 screen. Normal custom-screen PNG delivery uses the selected 400x300
++  display profile.
+diff --git a/include/config.h b/include/config.h
+index 13cb6dd..0a0506c 100644
+--- a/include/config.h
++++ b/include/config.h
+@@ -47,8 +47,8 @@
+ 
+ #define DISPLAY_BMP_IMAGE_SIZE 48062 // in bytes - 62 bytes - header; 48000 bytes - bitmap (480*800 1bpp) / 8
+ #define DEFAULT_IMAGE_SIZE     48000
+-#if defined(BOARD_X_CLASS)
+-#define MAX_IMAGE_SIZE 750000 // Use PSRAM on the ESP32-S3 (all X-class boards have PSRAM)
++#if defined(BOARD_X_CLASS) || defined(BOARD_ZECTRIX)
++#define MAX_IMAGE_SIZE 750000 // Use PSRAM on supported ESP32-S3 boards
+ #else
+ #define MAX_IMAGE_SIZE 90000 // largest compressed image we can receive
+ #endif
+@@ -82,6 +82,12 @@ enum WIFI_CONNECT_RETRY_TIME // Time to sleep before trying to connect to the Wi
+ #if defined(BOARD_TRMNL) || defined(BOARD_TRMNL_4CLR)
+ #define PIN_INTERRUPT 2
+ #define DEVICE_MODEL  "og"
++#elif defined(BOARD_ZECTRIX_NOTE4)
++#define PIN_INTERRUPT 0
++#define DEVICE_MODEL  "zectrix_note4"
++#elif defined(BOARD_ZECTRIX_NOTE4C)
++#define PIN_INTERRUPT 0
++#define DEVICE_MODEL  "zectrix_note4c"
+ #elif defined(BOARD_TRMNL_GEN2)
+ #define PIN_INTERRUPT 3
+ #define DEVICE_MODEL  "og_gen2"
+@@ -174,6 +180,8 @@ enum WIFI_CONNECT_RETRY_TIME // Time to sleep before trying to connect to the Wi
+ // DHCP hostname prefix (hyphens instead of spaces).
+ #if defined(BOARD_X_CLASS)
+ #define WIFI_CLIENT_HOSTNAME_PREFIX "TRMNL-X"
++#elif defined(BOARD_ZECTRIX)
++#define WIFI_CLIENT_HOSTNAME_PREFIX "TRMNL-ZECTRIX"
+ #elif defined(BOARD_TRMNL) || defined(BOARD_TRMNL_GEN2)
+ #define WIFI_CLIENT_HOSTNAME_PREFIX "TRMNL-OG"
+ #elif defined(BOARD_TRMNL_4CLR)
+@@ -185,6 +193,8 @@ enum WIFI_CONNECT_RETRY_TIME // Time to sleep before trying to connect to the Wi
+ #if defined(BOARD_XIAO_EPAPER_DISPLAY) || defined(BOARD_SEEED_RETERMINAL_E1001) ||                                     \
+   defined(BOARD_SEEED_RETERMINAL_E1002) || defined(BOARD_SEEED_RETERMINAL_E1003)
+ #define PIN_BATTERY 1
++#elif defined(BOARD_ZECTRIX)
++#define PIN_BATTERY 4
+ #elif defined(BOARD_XTEINK_X4)
+ #define PIN_BATTERY 0
+ #else
+diff --git a/include/zectrix.h b/include/zectrix.h
+new file mode 100644
+index 0000000..1e70fb6
+--- /dev/null
++++ b/include/zectrix.h
+@@ -0,0 +1,13 @@
++#pragma once
++
++#ifdef BOARD_ZECTRIX
++
++// Latch the board power rail and enable the e-paper rail. This must run at the
++// very beginning of setup(), before the physical power button is released.
++void zectrix_power_init();
++
++// Power down peripherals while keeping the board power latch asserted across
++// deep sleep.
++void zectrix_prepare_deep_sleep();
++
++#endif
+diff --git a/platformio.ini b/platformio.ini
+index 56de1a5..2f154e9 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -187,6 +187,47 @@ build_flags =
+ ;     managed_components/espressif__esp_rainmaker/server_certs/rmaker_ota_server.crt
+ 
+ 
++[env:zectrix_base]
++extends = env:esp32_base
++platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.37/platform-espressif32.zip
++board = esp32s3_n16r8
++board_build.f_cpu = 240000000L
++board_build.f_flash = 80000000L
++board_build.flash_mode = dio
++board_build.partitions = trmnl_x_partitions.csv
++board_build.cmake_extra_args = -DSDKCONFIG_DEFAULTS="sdkconfigs/sdkconfig.defaults;sdkconfigs/sdkconfig.defaults.zectrix"
++board_build.embed_txtfiles =
++	managed_components/espressif__esp_insights/server_certs/https_server.crt
++	managed_components/espressif__esp_rainmaker/server_certs/rmaker_mqtt_server.crt
++	managed_components/espressif__esp_rainmaker/server_certs/rmaker_claim_service_server.crt
++	managed_components/espressif__esp_rainmaker/server_certs/rmaker_ota_server.crt
++extra_scripts =
++	pre:scripts/extra/pin_component_manager.py
++	pre:scripts/extra/git_version.py
++	post:scripts/extra/post_build_zectrix.py
++custom_include_git_hash = ${sysenv.INCLUDE_GIT_HASH_IN_VERSION_NUMBER}
++build_flags =
++	${env:esp32_base.build_flags}
++	-D BOARD_ZECTRIX
++	-D NO_QA
++	-D DISABLE_OTA
++	-D PNG_MAX_BUFFERED_PIXELS=6432
++	-D ARDUINO_USB_MODE=1
++	-D ARDUINO_USB_CDC_ON_BOOT=1
++
++[env:zectrix_note4]
++extends = env:zectrix_base
++build_flags =
++	${env:zectrix_base.build_flags}
++	-D BOARD_ZECTRIX_NOTE4
++
++[env:zectrix_note4c]
++extends = env:zectrix_base
++build_flags =
++	${env:zectrix_base.build_flags}
++	-D BOARD_ZECTRIX_NOTE4C
++
++
+ [env:xteink_x4]
+ extends = env:esp32-c3-devkitc-02
+ custom_include_git_hash = true
+diff --git a/scripts/extra/post_build_zectrix.py b/scripts/extra/post_build_zectrix.py
+new file mode 100644
+index 0000000..6a76bba
+--- /dev/null
++++ b/scripts/extra/post_build_zectrix.py
+@@ -0,0 +1,38 @@
++Import("env")
++
++import subprocess
++from pathlib import Path
++
++
++def post_build(source, target, env):
++    build_dir = Path(env.subst("$BUILD_DIR"))
++    output = build_dir / "merged_firmware.bin"
++
++    subprocess.run(
++        [
++            env.subst("$UPLOADER"),
++            "--chip",
++            "ESP32S3",
++            "merge-bin",
++            "-o",
++            str(output),
++            "--flash-mode",
++            "dio",
++            "--flash-freq",
++            "80m",
++            "--flash-size",
++            "16MB",
++            "0x0000",
++            str(build_dir / "bootloader.bin"),
++            "0x8000",
++            str(build_dir / "partitions.bin"),
++            "0x20000",
++            str(build_dir / "firmware.bin"),
++        ],
++        check=True,
++    )
++
++    print(f"Merged firmware: {output}")
++
++
++env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", post_build)
+diff --git a/sdkconfigs/sdkconfig.defaults.zectrix b/sdkconfigs/sdkconfig.defaults.zectrix
+new file mode 100644
+index 0000000..8704b39
+--- /dev/null
++++ b/sdkconfigs/sdkconfig.defaults.zectrix
+@@ -0,0 +1,23 @@
++# Flash and PSRAM overrides for Zectrix Note 4/4C (ESP32-S3 N16R8).
++# Layered on top of sdkconfig.defaults via board_build.cmake_extra_args.
++
++CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
++CONFIG_ESPTOOLPY_FLASHMODE_QIO=n
++CONFIG_ESPTOOLPY_FLASHMODE="dio"
++
++CONFIG_ESPTOOLPY_FLASHSIZE_4MB=n
++CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
++CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
++
++CONFIG_SPIRAM=y
++CONFIG_SPIRAM_MODE_QUAD=n
++CONFIG_SPIRAM_MODE_OCT=y
++CONFIG_SPIRAM_TYPE_AUTO=y
++CONFIG_SPIRAM_SPEED_40M=n
++CONFIG_SPIRAM_SPEED_80M=y
++CONFIG_SPIRAM_SPEED=80
++CONFIG_SPIRAM_BOOT_HW_INIT=y
++CONFIG_SPIRAM_BOOT_INIT=y
++CONFIG_SPIRAM_USE_MALLOC=y
++CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
++CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+diff --git a/src/DEV_Config.h b/src/DEV_Config.h
+index 497cb4f..ddaa028 100644
+--- a/src/DEV_Config.h
++++ b/src/DEV_Config.h
+@@ -68,6 +68,17 @@
+ #define EPD_BUSY_PIN 4
+ #define SENSOR_SDA   21
+ #define SENSOR_SCL   20
++#elif defined(BOARD_ZECTRIX)
++#define EPD_SCK_PIN          12
++#define EPD_MOSI_PIN         13
++#define EPD_CS_PIN           11
++#define EPD_RST_PIN          9
++#define EPD_DC_PIN           10
++#define EPD_BUSY_PIN         8
++#define EPD_POWER_PIN        6
++#define VBAT_HOLD_PIN        17
++#define ZECTRIX_CHARGING_PIN 2
++#define ZECTRIX_CHARGED_PIN  1
+ #elif defined(BOARD_TRMNL_GEN2)
+ #define EPD_SCK_PIN      6
+ #define EPD_MOSI_PIN     1
+diff --git a/src/bl.cpp b/src/bl.cpp
+index 9243a1d..a38e2f3 100644
+--- a/src/bl.cpp
++++ b/src/bl.cpp
+@@ -4,6 +4,9 @@
+ #include <bl.h>
+ #include <wifi_network.h>
+ #include <power.h>
++#ifdef BOARD_ZECTRIX
++#include <zectrix.h>
++#endif
+ #include <device_id.h>
+ #include <trmnl_log.h>
+ #include <types.h>
+@@ -1097,7 +1100,9 @@ void bl_init(void)
+       showMessageWithLogo(NONE);
+     }
+ #else
++#ifndef BOARD_ZECTRIX_NOTE4C
+     display_show_image(storedLogoOrDefault(1), DEFAULT_IMAGE_SIZE, false, true);
++#endif
+ #endif // BOARD_TRMNL_X
+     // Force the display to show the current playlist image after the loading screen
+     // (even if it hasn't changed)
+@@ -3214,6 +3219,9 @@ void goToSleep(void)
+   gpio_hold_en(GPIO_NUM_13); // MOSFET enabling the battery power
+   gpio_deep_sleep_hold_en(); // Needed to keep the battery power enabled during RTC sleep
+ #endif
++#endif
++#ifdef BOARD_ZECTRIX
++  zectrix_prepare_deep_sleep();
+ #endif
+   esp_deep_sleep_start();
+ }
+@@ -3240,6 +3248,9 @@ static void goToSleepButtonOnly(void)
+ #ifdef BOARD_XTEINK_X4
+   gpio_hold_en(GPIO_NUM_13);
+   gpio_deep_sleep_hold_en();
++#endif
++#ifdef BOARD_ZECTRIX
++  zectrix_prepare_deep_sleep();
+ #endif
+   esp_deep_sleep_start();
+ }
+diff --git a/src/display.cpp b/src/display.cpp
+index 86eed35..63b586f 100644
+--- a/src/display.cpp
++++ b/src/display.cpp
+@@ -6,6 +6,10 @@
+ #include <Preferences.h>
+ #include <preferences_persistence.h>
+ #include "DEV_Config.h"
++#ifdef BOARD_ZECTRIX_NOTE4C
++#include <algorithm>
++#include <SPI.h>
++#endif
+ #ifdef BOARD_SEEED_RETERMINAL_E1002
+ #include "displays/spectra6.h"
+ #endif
+@@ -38,6 +42,18 @@ BBEPAPER bbep(EP397_800x480);
+     {EP75R_800x480, EP75R_800x480}, // b = darker grays
+ };
+ BBEPAPER bbep(EP75R_800x480);
++#elif defined(BOARD_ZECTRIX_NOTE4)
++    {EP42B_400x300, EP42B_400x300}, // default
++    {EP42B_400x300, EP42B_400x300}, // a
++    {EP42B_400x300, EP42B_400x300}, // b
++};
++BBEPAPER bbep(EP42B_400x300);
++#elif defined(BOARD_ZECTRIX_NOTE4C)
++    {EP42YR_400x300, EP42YR_400x300}, // default
++    {EP42YR_400x300, EP42YR_400x300}, // a
++    {EP42YR_400x300, EP42YR_400x300}, // b
++};
++BBEPAPER bbep(EP42YR_400x300);
+ #elif defined(BOARD_TRMNL_4CLR)
+     {EP75YR_800x480, EP75YR_800x480}, // default (for original EPD)
+     {EP75YR_800x480, EP75YR_800x480}, // a = uses built-in fast + 4-gray
+@@ -112,13 +128,172 @@ uint32_t iTempProfile;
+ static uint8_t *pDither;
+ 
+ #ifdef BB_EPAPER
++#ifdef BOARD_ZECTRIX_NOTE4C
++namespace {
++
++constexpr size_t ZECTRIX_NOTE4C_ROW_BYTES = 400 / 4;
++constexpr size_t ZECTRIX_NOTE4C_ROWS = 300;
++constexpr uint32_t ZECTRIX_NOTE4C_SPI_HZ = 40000000;
++SPIClass zectrix_note4c_spi(HSPI);
++
++void zectrix_note4c_write_command(uint8_t command)
++{
++    digitalWrite(EPD_DC_PIN, LOW);
++    digitalWrite(EPD_CS_PIN, LOW);
++    zectrix_note4c_spi.transfer(command);
++    digitalWrite(EPD_CS_PIN, HIGH);
++}
++
++void zectrix_note4c_write_data(const uint8_t *data, size_t length)
++{
++    digitalWrite(EPD_DC_PIN, HIGH);
++    digitalWrite(EPD_CS_PIN, LOW);
++    zectrix_note4c_spi.transferBytes(data, nullptr, length);
++    digitalWrite(EPD_CS_PIN, HIGH);
++}
++
++void zectrix_note4c_write_data(uint8_t value)
++{
++    zectrix_note4c_write_data(&value, 1);
++}
++
++bool zectrix_note4c_wait_idle(const char *stage, uint32_t timeout_ms)
++{
++    const uint32_t started_at = millis();
++    while (digitalRead(EPD_BUSY_PIN) == LOW) {
++        if (millis() - started_at >= timeout_ms) {
++            Log_error("EPD busy timeout: stage=%s gpio=%d level=%d elapsed_ms=%lu",
++                      stage, EPD_BUSY_PIN, digitalRead(EPD_BUSY_PIN), millis() - started_at);
++            return false;
++        }
++        delay(1);
++    }
++    Log_info("EPD idle: stage=%s elapsed_ms=%lu", stage, millis() - started_at);
++    return true;
++}
++
++bool zectrix_note4c_update()
++{
++    auto *buffer = static_cast<uint8_t *>(bbep.getBuffer());
++    if (buffer == nullptr) {
++        Log_error("EPD update failed: framebuffer is not allocated");
++        return false;
++    }
++
++#ifdef DEV_FIRMWARE
++    {
++        uint32_t frame_hash = 2166136261u;
++        uint32_t color_counts[4] = {};
++        for (size_t index = 0; index < ZECTRIX_NOTE4C_ROW_BYTES * ZECTRIX_NOTE4C_ROWS; ++index) {
++            const uint8_t value = buffer[index];
++            frame_hash = (frame_hash ^ value) * 16777619u;
++            for (uint8_t shift = 0; shift < 8; shift += 2) {
++                ++color_counts[(value >> shift) & 0x03];
++            }
++        }
++        Log_info("EPD frame: hash=%08lx colors=[%lu,%lu,%lu,%lu] first=%02x %02x %02x %02x %02x %02x %02x %02x",
++                 frame_hash, color_counts[0], color_counts[1], color_counts[2], color_counts[3],
++                 buffer[0], buffer[1], buffer[2], buffer[3],
++                 buffer[4], buffer[5], buffer[6], buffer[7]);
++    }
++#endif
++
++    digitalWrite(EPD_POWER_PIN, HIGH);
++    digitalWrite(EPD_CS_PIN, HIGH);
++
++    // Sequence recovered from the Zectrix Note4C factory firmware.
++    delay(10);
++    digitalWrite(EPD_RST_PIN, HIGH);
++    delay(10);
++    digitalWrite(EPD_RST_PIN, LOW);
++    delay(20);
++    digitalWrite(EPD_RST_PIN, HIGH);
++    delay(10);
++    if (!zectrix_note4c_wait_idle("reset", 60000)) {
++        return false;
++    }
++
++    zectrix_note4c_spi.beginTransaction(SPISettings(ZECTRIX_NOTE4C_SPI_HZ, MSBFIRST, SPI_MODE0));
++
++    zectrix_note4c_write_command(0xE9);
++    zectrix_note4c_write_data(0x01);
++
++    zectrix_note4c_write_command(0x10);
++    if (!zectrix_note4c_wait_idle("image_write", 60000)) {
++        zectrix_note4c_spi.endTransaction();
++        digitalWrite(EPD_CS_PIN, HIGH);
++        return false;
++    }
++    for (size_t row = 0; row < ZECTRIX_NOTE4C_ROWS; ++row) {
++        zectrix_note4c_write_data(buffer + row * ZECTRIX_NOTE4C_ROW_BYTES,
++                                  ZECTRIX_NOTE4C_ROW_BYTES);
++        if ((row % 16) == 15) {
++            delay(1);
++        }
++    }
++
++    zectrix_note4c_write_command(0x04);
++    if (!zectrix_note4c_wait_idle("power_on", 60000)) {
++        zectrix_note4c_spi.endTransaction();
++        digitalWrite(EPD_CS_PIN, HIGH);
++        return false;
++    }
++    delay(10);
++
++    zectrix_note4c_write_command(0x12);
++    zectrix_note4c_write_data(0x00);
++    delay(10);
++    if (!zectrix_note4c_wait_idle("display_refresh", 180000)) {
++        zectrix_note4c_spi.endTransaction();
++        digitalWrite(EPD_CS_PIN, HIGH);
++        return false;
++    }
++
++    zectrix_note4c_write_command(0x02);
++    zectrix_note4c_write_data(0x00);
++    if (!zectrix_note4c_wait_idle("controller_power_off", 60000)) {
++        zectrix_note4c_spi.endTransaction();
++        digitalWrite(EPD_CS_PIN, HIGH);
++        return false;
++    }
++
++    delay(20);
++    zectrix_note4c_write_command(0x07);
++    zectrix_note4c_write_data(0xA5);
++    digitalWrite(EPD_CS_PIN, HIGH);
++    zectrix_note4c_spi.endTransaction();
++    digitalWrite(EPD_POWER_PIN, LOW);
++    return true;
++}
++
++} // namespace
++#endif
++
+ static bool display_update_epaper(int refreshMode, bool wait, bool writePlane = false, uint8_t plane = PLANE_0)
+ {
+ #ifdef BOARD_SEEED_RETERMINAL_E1002
+     return spectra6_update();
++#elif defined(BOARD_ZECTRIX_NOTE4C)
++    (void)refreshMode;
++    (void)wait;
++    (void)writePlane;
++    (void)plane;
++    Log_info("Zectrix Note4C native EPD update start: busy=%d millis=%lu",
++             digitalRead(EPD_BUSY_PIN), millis());
++    const bool result = zectrix_note4c_update();
++    Log_info("Zectrix Note4C native EPD update end: ok=%d busy=%d millis=%lu",
++             result, digitalRead(EPD_BUSY_PIN), millis());
++    bCanDoPartial = false;
++    return result;
+ #else
+     if (writePlane) {
+-        bbep.writePlane(plane);
++        Log_info("EPD writePlane start: plane=%d busy=%d millis=%lu", plane, digitalRead(EPD_BUSY_PIN), millis());
++        int rc = bbep.writePlane(plane);
++        Log_info("EPD writePlane end: rc=%d busy=%d millis=%lu", rc, digitalRead(EPD_BUSY_PIN), millis());
++        if (rc != BBEP_SUCCESS) {
++            Log_error("EPD writePlane failed: %d", rc);
++            return false;
++        }
+     }
+     if (refreshMode == REFRESH_PARTIAL && !bCanDoPartial) {
+         refreshMode = REFRESH_FAST;
+@@ -126,7 +301,14 @@ static bool display_update_epaper(int refreshMode, bool wait, bool writePlane =
+     } else {
+         Log_info("Have valid previous image in EPD memory, doing partial refresh");
+     }
+-    bbep.refresh(refreshMode, wait);
++    Log_info("EPD refresh start: mode=%d wait=%d busy=%d millis=%lu", refreshMode, wait,
++             digitalRead(EPD_BUSY_PIN), millis());
++    int rc = bbep.refresh(refreshMode, wait);
++    Log_info("EPD refresh end: rc=%d busy=%d millis=%lu", rc, digitalRead(EPD_BUSY_PIN), millis());
++    if (rc != BBEP_SUCCESS) {
++        Log_error("EPD refresh failed: %d", rc);
++        return false;
++    }
+     // The next update can be a partial update because the current is 1-bpp and stays in the EPD RAM
+     bCanDoPartial = (bbep.getPanelType() == dpList[iTempProfile].OneBit);
+     return true;
+@@ -153,6 +335,25 @@ void display_init(void)
+     Log_info("BB e-Paper init");
+ #ifdef BOARD_SEEED_RETERMINAL_E1002
+     spectra6_init_spi();
++#elif defined(BOARD_ZECTRIX_NOTE4C)
++    // bb_epaper owns the framebuffer/rendering API, while the physical panel
++    // uses Zectrix's native command sequence. Suppress bb_epaper's generic
++    // GDEM042F52 initialization during SPI setup.
++    const auto *init_full = bbep._bbep.pInitFull;
++    const auto *init_fast = bbep._bbep.pInitFast;
++    const auto *init_part = bbep._bbep.pInitPart;
++    bbep._bbep.pInitFull = nullptr;
++    bbep._bbep.pInitFast = nullptr;
++    bbep._bbep.pInitPart = nullptr;
++    bbep.initIO(EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN, EPD_CS_PIN, EPD_MOSI_PIN, EPD_SCK_PIN,
++                ZECTRIX_NOTE4C_SPI_HZ);
++    bbep._bbep.pInitFull = init_full;
++    bbep._bbep.pInitFast = init_fast;
++    bbep._bbep.pInitPart = init_part;
++    // The Zectrix reference firmware drives the panel from SPI3_HOST. Arduino's
++    // global SPI instance is SPI2_HOST on ESP32-S3, so keep a dedicated HSPI
++    // instance for the physical panel while bb_epaper remains rendering-only.
++    zectrix_note4c_spi.begin(EPD_SCK_PIN, -1, EPD_MOSI_PIN, -1);
+ #else
+     bbep.initIO(EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN, EPD_CS_PIN, EPD_MOSI_PIN, EPD_SCK_PIN, 8000000);
+ #endif
+@@ -1062,7 +1263,7 @@ int png_draw_6clr(PNGDRAW *pDraw)
+ } /* png_draw_6clr() */
+ #endif // E1002 (Spectra6 only)
+ 
+-#ifdef BOARD_TRMNL_4CLR
++#if defined(BOARD_TRMNL_4CLR) || defined(BOARD_ZECTRIX_NOTE4C)
+ //
+ // Draw the PNG image into the local framebuffer memory using the drawPixel() method
+ // to do color translation and to properly format the memory layout
+@@ -1166,10 +1367,26 @@ int png_draw_4clr(PNGDRAW *pDraw)
+                 *d++ = uc;
+             }
+         } // for x
++#ifdef BOARD_ZECTRIX_NOTE4C
++    if ((pDraw->iWidth & 3) != 0) {
++        uc <<= 2 * (4 - (pDraw->iWidth & 3));
++        *d++ = uc;
++    }
++    if (pDraw->y >= 0 && pDraw->y < static_cast<int>(ZECTRIX_NOTE4C_ROWS)) {
++        auto *framebuffer = static_cast<uint8_t *>(bbep.getBuffer());
++        if (framebuffer == nullptr) {
++            return 0;
++        }
++        const size_t decoded_bytes = (pDraw->iWidth + 3) / 4;
++        const size_t copy_bytes = std::min(decoded_bytes, ZECTRIX_NOTE4C_ROW_BYTES);
++        memcpy(framebuffer + pDraw->y * ZECTRIX_NOTE4C_ROW_BYTES, pTemp, copy_bytes);
++    }
++#else
+     bbep.writeData(pTemp, (pDraw->iWidth+3)/4);
++#endif
+     return 1; // continue decoding
+ } /* png_draw4clr() */
+-#endif // BOARD_TRMNL_4CLR (4 color only)
++#endif // four-color displays
+ 
+ int png_draw(PNGDRAW *pDraw)
+ {
+@@ -1589,15 +1806,33 @@ PNG *png = new PNG();
+             delete(png); // free the decoder instance
+             return REFRESH_FULL;
+ #endif // E1002
+-#ifdef BOARD_TRMNL_4CLR
++#if defined(BOARD_TRMNL_4CLR) || defined(BOARD_ZECTRIX_NOTE4C)
+             Log_info("%s [%d]: decoding for 4-color EPD\r\n", __FILE__, __LINE__);
++#ifdef BOARD_ZECTRIX_NOTE4C
++            if (bbep.allocBuffer() != BBEP_SUCCESS) {
++                Log_error("%s [%d]: bbep.allocBuffer failed\n\r", __FILE__, __LINE__);
++                png->close();
++                delete(png);
++                return -1;
++            }
++            bbep.fillScreen(BBEP_WHITE);
++#endif
+             png->openRAM((uint8_t *)pPNG, iDataSize, png_draw_4clr);
++#ifndef BOARD_ZECTRIX_NOTE4C
+             bbep.startWrite(PLANE_1); // start writing image data
+-            png->decode(NULL, 0);
++#endif
++            rc = png->decode(NULL, 0);
+             png->close();
+             delete(png); // free the decoder instance
++            if (rc != PNG_SUCCESS) {
++#ifdef BOARD_ZECTRIX_NOTE4C
++                bbep.freeBuffer();
++#endif
++                Log_error("Four-color PNG decode failed: %d", rc);
++                return -1;
++            }
+             return REFRESH_FULL;
+-#endif // BOARD_TRMNL_4CLR
++#endif // four-color displays
+             bbep.setAddrWindow(0, 0, bbep.width(), bbep.height());
+             if (png->getBpp() == 1 || (png->getBpp() == 2 && png_count_colors(png, pPNG, iDataSize) == 2)) { // 1-bit image (single plane)
+                 png->close(); // use a different PNGDraw callback for color matching
+@@ -1721,6 +1956,9 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait, bool b
+     {
+         Log_info("Drawing PNG");
+         iRefreshMode = png_to_epd(image_buffer, data_size, false);
++#ifdef BOARD_ZECTRIX_NOTE4C
++        bAlloc = (bbep.getBuffer() != nullptr);
++#endif
+     }
+     else if (MOTOSHORT(image_buffer) == 0xffd8) {
+         Log_info("Drawing JPEG");
+@@ -1782,7 +2020,9 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait, bool b
+         }
+ #ifdef BB_EPAPER
+ #ifndef BOARD_SEEED_RETERMINAL_E1002
++#ifndef BOARD_ZECTRIX_NOTE4C
+         bbep.writePlane(); // send image data to the EPD
++#endif
+ #endif // !BOARD_SEEED_RETERMINAL_E1002
+         iRefreshMode = REFRESH_PARTIAL;
+ #endif // BB_EPAPER
+@@ -2551,6 +2791,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
+     {
+         Log_info("Display set to white");
+         bbep.fillScreen(BBEP_WHITE);
++#if !defined(BOARD_ZECTRIX_NOTE4C)
+ #ifdef BB_EPAPER
+         if (!display_update_epaper(apiDisplayResult.response.maximum_compatibility ? REFRESH_FULL : REFRESH_FAST, true, true, PLANE_0)) {
+             Log_error("display_show_msg: WiFi connect update failed");
+@@ -2561,6 +2802,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
+         bbep.fullUpdate();
+ #endif
+         display_sleep(1000);
++#endif
+     }
+ 
+     auto width = display_width();
+@@ -2688,7 +2930,13 @@ void display_sleep(void)
+ {
+     Log_info("Goto Sleep...");
+ #ifdef BB_EPAPER
++#ifdef BOARD_ZECTRIX_NOTE4C
++    // The native Note4C refresh sequence already puts the SSD2683 into deep
++    // sleep and disables the EPD power rail.
++    digitalWrite(EPD_POWER_PIN, LOW);
++#else
+     bbep.sleep(LIGHT_SLEEP);
++#endif
+ #else
+     bbep.einkPower(0);
+     bbep.deInit();
+diff --git a/src/firmware_update.cpp b/src/firmware_update.cpp
+index 89acc00..ae2dd7b 100644
+--- a/src/firmware_update.cpp
++++ b/src/firmware_update.cpp
+@@ -21,6 +21,10 @@ FirmwareUpdateService::FirmwareUpdateService(Persistence &persistence, GetTimeFn
+       _wifiConnectionRssiThreshold(wifiConnectionRssiThreshold), _firmwareUrl{0} {}
+ 
+ bool FirmwareUpdateService::isUpdateDue(bool update_firmware, const String &firmware_url) {
++#ifdef DISABLE_OTA
++  Log_info("%s [%d]: OTA is disabled for this build\r\n", __FILE__, __LINE__);
++  return false;
++#endif
+   Log_info("%s [%d]: update_firmware: %d\r\n", __FILE__, __LINE__, update_firmware);
+   if (!update_firmware) return false;
+ 
+diff --git a/src/main.cpp b/src/main.cpp
+index 8fd1250..b39692e 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -4,6 +4,9 @@
+ #include "esp_ota_ops.h"
+ #include "power.h"
+ #include "qa.h"
++#ifdef BOARD_ZECTRIX
++#include "zectrix.h"
++#endif
+ 
+ #ifdef BOARD_TRMNL_X
+ #include "display.h"
+@@ -67,11 +70,16 @@ void setup() {
+ }
+ #else // TRMNL OG setup()
+ void setup() {
++#ifdef BOARD_ZECTRIX
++  zectrix_power_init();
++#endif
+ 
++#ifndef NO_QA
+   bool testPassed = checkIfAlreadyPassed();
+   if (!testPassed) {
+     startQA();
+   }
++#endif
+   esp_ota_mark_app_valid_cancel_rollback();
+   bl_init();
+ }
+diff --git a/src/power.cpp b/src/power.cpp
+index 3cbaeb2..c805d9e 100644
+--- a/src/power.cpp
++++ b/src/power.cpp
+@@ -20,6 +20,12 @@ UsbStatus get_usb_status(void) {
+   // BQ25616 PG wired to a dedicated C5 GPIO; open-drain, LOW = VBUS present.
+   pinMode(BQ25616_PG_PIN, INPUT);
+   return (digitalRead(BQ25616_PG_PIN) == 0) ? UsbStatus::CONNECTED : UsbStatus::DISCONNECTED;
++#elif defined(BOARD_ZECTRIX)
++  pinMode(ZECTRIX_CHARGING_PIN, INPUT_PULLUP);
++  pinMode(ZECTRIX_CHARGED_PIN, INPUT);
++  return (digitalRead(ZECTRIX_CHARGING_PIN) == LOW || digitalRead(ZECTRIX_CHARGED_PIN) == HIGH)
++           ? UsbStatus::CONNECTED
++           : UsbStatus::DISCONNECTED;
+ #else
+   return UsbStatus::UNKNOWN;
+ #endif
+@@ -34,6 +40,10 @@ ChargingStatus get_charging_status(void) {
+ #elif defined(BOARD_TRMNL_GEN2)
+   pinMode(BQ25616_STAT_PIN, INPUT);
+   return (digitalRead(BQ25616_STAT_PIN) == 0) ? ChargingStatus::CHARGING : ChargingStatus::NOT_CHARGING;
++#elif defined(BOARD_ZECTRIX)
++  pinMode(ZECTRIX_CHARGING_PIN, INPUT_PULLUP);
++  return (digitalRead(ZECTRIX_CHARGING_PIN) == LOW) ? ChargingStatus::CHARGING
++                                                    : ChargingStatus::NOT_CHARGING;
+ #else
+   return ChargingStatus::UNKNOWN;
+ #endif
+diff --git a/src/zectrix.cpp b/src/zectrix.cpp
+new file mode 100644
+index 0000000..1a18681
+--- /dev/null
++++ b/src/zectrix.cpp
+@@ -0,0 +1,47 @@
++#include "zectrix.h"
++
++#ifdef BOARD_ZECTRIX
++
++#include <Arduino.h>
++#include <DEV_Config.h>
++#include <driver/gpio.h>
++#include <driver/rtc_io.h>
++
++namespace {
++
++void configure_output(gpio_num_t pin, uint32_t level) {
++  rtc_gpio_hold_dis(pin);
++  rtc_gpio_deinit(pin);
++  pinMode(static_cast<uint8_t>(pin), OUTPUT);
++  digitalWrite(static_cast<uint8_t>(pin), level);
++}
++
++void hold_rtc_output(gpio_num_t pin, uint32_t level) {
++  rtc_gpio_hold_dis(pin);
++  rtc_gpio_init(pin);
++  rtc_gpio_set_direction(pin, RTC_GPIO_MODE_OUTPUT_ONLY);
++  rtc_gpio_set_level(pin, level);
++  rtc_gpio_hold_en(pin);
++}
++
++} // namespace
++
++void zectrix_power_init() {
++  gpio_deep_sleep_hold_dis();
++
++  configure_output(static_cast<gpio_num_t>(VBAT_HOLD_PIN), HIGH);
++  configure_output(static_cast<gpio_num_t>(EPD_POWER_PIN), HIGH);
++  delay(10);
++}
++
++void zectrix_prepare_deep_sleep() {
++  // The panel is bistable, so its power rail can be disabled after refresh.
++  hold_rtc_output(static_cast<gpio_num_t>(EPD_POWER_PIN), LOW);
++
++  // GPIO17 controls the board's battery power latch. Letting it fall LOW cuts
++  // power to the ESP32-S3 and prevents timer/button deep-sleep wake-up.
++  hold_rtc_output(static_cast<gpio_num_t>(VBAT_HOLD_PIN), HIGH);
++  gpio_deep_sleep_hold_en();
++}
++
++#endif
+-- 
+2.56.0
+

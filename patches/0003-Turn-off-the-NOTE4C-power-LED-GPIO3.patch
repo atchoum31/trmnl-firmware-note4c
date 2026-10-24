@@ -1,0 +1,44 @@
+From 155903c43623d38b1c5256be230384fde3068a25 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cl=C3=A9ment=20Thersiquel?= <16476634+atchoum31@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 01:01:18 +0200
+Subject: [PATCH 3/3] Turn off the NOTE4C power LED (GPIO3)
+
+The LED is active LOW and the zectrix port never drives GPIO3, so it stays lit.
+Drive it HIGH at boot and hold it HIGH during deep sleep.
+---
+ src/zectrix.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/zectrix.cpp b/src/zectrix.cpp
+index 1a18681..a561a7a 100644
+--- a/src/zectrix.cpp
++++ b/src/zectrix.cpp
+@@ -9,6 +9,8 @@
+ 
+ namespace {
+ 
++  constexpr gpio_num_t ZECTRIX_POWER_LED_PIN = GPIO_NUM_3;
++
+ void configure_output(gpio_num_t pin, uint32_t level) {
+   rtc_gpio_hold_dis(pin);
+   rtc_gpio_deinit(pin);
+@@ -31,6 +33,8 @@ void zectrix_power_init() {
+ 
+   configure_output(static_cast<gpio_num_t>(VBAT_HOLD_PIN), HIGH);
+   configure_output(static_cast<gpio_num_t>(EPD_POWER_PIN), HIGH);
++  // Power LED (GPIO3, active LOW): keep it off, it is never driven otherwise and stays lit
++  configure_output(ZECTRIX_POWER_LED_PIN, HIGH);
+   delay(10);
+ }
+ 
+@@ -41,6 +45,7 @@ void zectrix_prepare_deep_sleep() {
+   // GPIO17 controls the board's battery power latch. Letting it fall LOW cuts
+   // power to the ESP32-S3 and prevents timer/button deep-sleep wake-up.
+   hold_rtc_output(static_cast<gpio_num_t>(VBAT_HOLD_PIN), HIGH);
++  hold_rtc_output(ZECTRIX_POWER_LED_PIN, HIGH);
+   gpio_deep_sleep_hold_en();
+ }
+ 
+-- 
+2.56.0
+
