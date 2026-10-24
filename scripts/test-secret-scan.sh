@@ -24,6 +24,7 @@ expect() {
 }
 
 diff_of() { printf '+++ b/x\n+%s\n' "$1"; }
+# shellcheck disable=SC2317,SC2329 # called through expect
 stdin_scan() { python3 -I "$SCAN" <<<"$1"; }
 
 b64=$(printf '%s' "$tok" | base64 | tr -d '\n')
