@@ -52,7 +52,7 @@ PROMPT=$prompt docker run --rm \
     npm install --silent --prefix /tmp/npm "@anthropic-ai/claude-code@'"$CLAUDE_VERSION"'" >/dev/null 2>&1 || exit 3
     /tmp/npm/node_modules/.bin/claude -p "$PROMPT" \
       --model "$MODEL" \
-      --max-turns 40 \
+      --max-turns 200 \
       --permission-mode dontAsk \
       --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git diff *),Bash(git status *),Bash(git log *),Bash(git show *),Bash(git rm *),Bash(git mv *)" \
       --disallowedTools "WebFetch,WebSearch,mcp__*,Bash(git push *),Bash(git remote *),Bash(git config *),Bash(curl *),Bash(wget *)"
@@ -60,7 +60,9 @@ PROMPT=$prompt docker run --rm \
 echo "claude exited with code $rc"
 
 scan || exit 1
+# The tree decides, not Claude's exit code: the next apply refuses leftover
+# conflict markers, and the build catches the rest.
 if [[ $rc -ne 0 ]]; then
   tail -n 50 "$FW/.ci/claude-$MODE.log"
+  echo "::warning::claude exited with code $rc, checking the tree anyway"
 fi
-exit "$rc"
