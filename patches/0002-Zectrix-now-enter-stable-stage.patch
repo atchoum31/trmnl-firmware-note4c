@@ -1,4 +1,4 @@
-From 8b753d06edb5db7066e5ebc4a99a05bf46cb9e1f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: LitoMore <litomore@gmail.com>
 Date: Mon, 3 Aug 2026 11:15:38 +0800
 Subject: [PATCH 2/3] Zectrix now enter stable stage
@@ -86,6 +86,3 @@ index 7aec7fc..b1d9dad 100644
  
  ## Deliberate limitations
  
--- 
-2.56.0
-
