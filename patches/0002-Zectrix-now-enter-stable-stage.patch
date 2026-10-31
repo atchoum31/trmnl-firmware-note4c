@@ -9,7 +9,7 @@ Subject: [PATCH 2/3] Zectrix now enter stable stage
  2 files changed, 12 insertions(+), 17 deletions(-)
 
 diff --git a/README.md b/README.md
-index 356e24c..6d4906a 100644
+index 388c745..9bceaeb 100644
 --- a/README.md
 +++ b/README.md
 @@ -8,7 +8,7 @@ created for the [TRMNL](https://trmnl.com) e-ink display.

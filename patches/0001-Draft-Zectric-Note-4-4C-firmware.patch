@@ -9,16 +9,18 @@ Subject: [PATCH 1/3] Draft Zectric Note 4/4C firmware
  docs/zectrix.md                       | 117 ++++++++++++
  include/config.h                      |  29 ++-
  include/zectrix.h                     |  13 ++
- platformio.ini                        |  41 ++++
+ platformio.ini                        |  41 +++++
  scripts/extra/post_build_zectrix.py   |  38 ++++
  sdkconfigs/sdkconfig.defaults.zectrix |  23 +++
- src/bl.cpp                            |  11 ++
- src/display.cpp                       | 257 +++++++++++++++++++++++++-
+ src/bl.cpp                            |   3 +
+ src/display.cpp                       | 255 +++++++++++++++++++++++++-
  src/main.cpp                          |   8 +
  src/power/power.cpp                   |  23 +++
  src/services/firmware_update.cpp      |   4 +
+ src/sleep_session.cpp                 |  10 +
+ src/status_screens.cpp                |   2 +
  src/zectrix.cpp                       |  47 +++++
- 14 files changed, 608 insertions(+), 10 deletions(-)
+ 16 files changed, 611 insertions(+), 9 deletions(-)
  create mode 100644 docs/zectrix.md
  create mode 100644 include/zectrix.h
  create mode 100644 scripts/extra/post_build_zectrix.py
@@ -38,7 +40,7 @@ index 5060066..9abc97e 100644
  .vscode/c_cpp_properties.json
  .vscode/extensions.json
 diff --git a/README.md b/README.md
-index 2d80bf5..356e24c 100644
+index ceca611..388c745 100644
 --- a/README.md
 +++ b/README.md
 @@ -7,6 +7,10 @@ created for the [TRMNL](https://trmnl.com) e-ink display.
@@ -52,7 +54,7 @@ index 2d80bf5..356e24c 100644
  ## **Algorithm block scheme**
  
  ```mermaid
-@@ -410,4 +414,4 @@ We use `clang-format` for formatting C/C++ source files. You can install it [via
+@@ -353,4 +357,4 @@ We use `clang-format` for formatting C/C++ source files. You can install it [via
  Two ways to format files:
  
  1. Run `./scripts/format.sh` to format the entire repository.
@@ -183,10 +185,10 @@ index 0000000..7aec7fc
 +  800x480 screen. Normal custom-screen PNG delivery uses the selected 400x300
 +  display profile.
 diff --git a/include/config.h b/include/config.h
-index d9f070e..c9f4f84 100644
+index 663d52d..f453117 100644
 --- a/include/config.h
 +++ b/include/config.h
-@@ -47,8 +47,8 @@
+@@ -50,8 +50,8 @@
  
  #define DISPLAY_BMP_IMAGE_SIZE 48062 // in bytes - 62 bytes - header; 48000 bytes - bitmap (480*800 1bpp) / 8
  #define DEFAULT_IMAGE_SIZE     48000
@@ -197,7 +199,7 @@ index d9f070e..c9f4f84 100644
  #else
  #define MAX_IMAGE_SIZE 90000 // largest compressed image we can receive in static RAM
  #endif
-@@ -62,7 +62,13 @@
+@@ -65,7 +65,13 @@
  
  #define MS_TO_S_FACTOR       1000 /* Conversion factor for milliseconds to seconds */
  
@@ -212,7 +214,7 @@ index d9f070e..c9f4f84 100644
  #define PIN_INTERRUPT      3
  #define PIN_INTERNAL_SDA   39
  #define PIN_INTERNAL_SCL   40
-@@ -102,6 +108,8 @@
+@@ -105,6 +111,8 @@
  // DHCP hostname prefix (hyphens instead of spaces).
  #if defined(PARALLEL_EPD)
  #define WIFI_CLIENT_HOSTNAME_PREFIX "TRMNL-X"
@@ -221,7 +223,7 @@ index d9f070e..c9f4f84 100644
  #elif defined(BOARD_TRMNL) || defined(BOARD_TRMNL_GEN2)
  #define WIFI_CLIENT_HOSTNAME_PREFIX "TRMNL-OG"
  #elif defined(BOARD_TRMNL_4CLR)
-@@ -113,6 +121,8 @@
+@@ -116,6 +124,8 @@
  #if defined(BOARD_XIAO_EPAPER_DISPLAY) || defined(BOARD_SEEED_RETERMINAL_E1001) ||                                     \
    defined(BOARD_SEEED_RETERMINAL_E1002) || defined(BOARD_SEEED_RETERMINAL_E1003)
  #define PIN_BATTERY 1
@@ -230,7 +232,7 @@ index d9f070e..c9f4f84 100644
  #elif defined(BOARD_XTEINK_X4)
  #define PIN_BATTERY 0
  #else
-@@ -184,6 +194,8 @@ enum {
+@@ -188,6 +198,8 @@ enum {
    EPD_PAPER_COLOR,
    EPD_133_COLOR,
    EPD_368,
@@ -239,7 +241,7 @@ index d9f070e..c9f4f84 100644
  };
  
  /**
-@@ -202,6 +214,17 @@ enum {
+@@ -206,6 +218,17 @@ enum {
  #define EPD_EN_PIN   11
  #define EPD_BUSY_PIN 13
  #define EPD_VCC_EN   21
@@ -277,13 +279,14 @@ index 0000000..1e70fb6
 +
 +#endif
 diff --git a/platformio.ini b/platformio.ini
-index 068926f..3cca275 100644
+index 43bc5b5..5712ac2 100644
 --- a/platformio.ini
 +++ b/platformio.ini
-@@ -193,6 +193,47 @@ build_flags =
+@@ -195,6 +195,47 @@ build_flags =
+ ;     managed_components/espressif__esp_rainmaker/server_certs/rmaker_claim_service_server.crt
  ;     managed_components/espressif__esp_rainmaker/server_certs/rmaker_ota_server.crt
  
- 
++
 +[env:zectrix_base]
 +extends = env:esp32_base
 +platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.37/platform-espressif32.zip
@@ -291,7 +294,7 @@ index 068926f..3cca275 100644
 +board_build.f_cpu = 240000000L
 +board_build.f_flash = 80000000L
 +board_build.flash_mode = dio
-+board_build.partitions = trmnl_x_partitions.csv
++board_build.partitions = boards/trmnl_x_partitions.csv
 +board_build.cmake_extra_args = -DSDKCONFIG_DEFAULTS="sdkconfigs/sdkconfig.defaults;sdkconfigs/sdkconfig.defaults.zectrix"
 +board_build.embed_txtfiles =
 +	managed_components/espressif__esp_insights/server_certs/https_server.crt
@@ -323,7 +326,6 @@ index 068926f..3cca275 100644
 +build_flags =
 +	${env:zectrix_base.build_flags}
 +	-D BOARD_ZECTRIX_NOTE4C
-+
 +
  [env:xteink_x4]
  extends = env:esp32-c3-devkitc-02
@@ -402,10 +404,10 @@ index 0000000..8704b39
 +CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 +CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 diff --git a/src/bl.cpp b/src/bl.cpp
-index 124625d..94ceebb 100644
+index f539015..0c9fa7e 100644
 --- a/src/bl.cpp
 +++ b/src/bl.cpp
-@@ -6,6 +6,9 @@
+@@ -10,6 +10,9 @@
  #include <power.h>
  #include <config.h>
  #include <battery.h>
@@ -415,42 +417,12 @@ index 124625d..94ceebb 100644
  #include <device_id.h>
  #include <trmnl_log.h>
  #include <types.h>
-@@ -931,7 +934,9 @@ void bl_init(void)
-       showMessageWithLogo(NONE);
-     }
- #else
-+#ifndef BOARD_ZECTRIX_NOTE4C
-     display_show_image(storedLogoOrDefault(1), DEFAULT_IMAGE_SIZE, false, true);
-+#endif
- #endif // BOARD_TRMNL_X
-     // Force the display to show the current playlist image after the loading screen
-     // (even if it hasn't changed)
-@@ -2322,6 +2327,9 @@ void goToSleep(void)
-   gpio_hold_en(GPIO_NUM_13); // MOSFET enabling the battery power
-   gpio_deep_sleep_hold_en(); // Needed to keep the battery power enabled during RTC sleep
- #endif
-+#endif
-+#ifdef BOARD_ZECTRIX
-+  zectrix_prepare_deep_sleep();
- #endif
-   esp_deep_sleep_start();
- }
-@@ -2352,6 +2360,9 @@ static void goToSleepButtonOnly(void)
- #ifdef BOARD_XTEINK_X4
-   gpio_hold_en(GPIO_NUM_13);
-   gpio_deep_sleep_hold_en();
-+#endif
-+#ifdef BOARD_ZECTRIX
-+  zectrix_prepare_deep_sleep();
- #endif
-   esp_deep_sleep_start();
- }
 diff --git a/src/display.cpp b/src/display.cpp
-index 02aa020..478c04b 100644
+index aad792f..4cdb0f2 100644
 --- a/src/display.cpp
 +++ b/src/display.cpp
-@@ -6,6 +6,10 @@
- #include <Preferences.h>
+@@ -7,6 +7,10 @@
+ #include <WiFi.h>
  #include <preferences_persistence.h>
  #include <refresh_interval.h>
 +#ifdef BOARD_ZECTRIX_NOTE4C
@@ -460,19 +432,14 @@ index 02aa020..478c04b 100644
  #include "battery_small.h"
  #include "battery_hollow.h"
  #include "messages.h"
-@@ -62,8 +66,10 @@ const TRMNL_DEVICE device_list[] =
-   "xiao_epaper_6clr", 7, 9,     44,  38,   10,  4,    0xff, 0xff, 5,     1,    6,       BATT_ADC,  EPD_75_6CLR,
-   "reterminal_e1001", 7, 9,     10,  12,   11,  13,   0xff, 0xff, 3,     1,    21,      BATT_ADC,  EPD_75,
-   "reterminal_e1002", 7, 9,     10,  12,   11,  13,   0xff, 0xff, 3,     1,    21,      BATT_ADC,  EPD_75_6CLR,
--  "crowpanel42",   0,    0,     0,   0,    0,   0,    0xff, 0xff, 2,     0xff, 0xff,    BATT_NONE, EPD_CROWPANEL, 
-+  "crowpanel42",   0,    0,     0,   0,    0,   0,    0xff, 0xff, 2,     0xff, 0xff,    BATT_NONE, EPD_CROWPANEL,
- #ifdef CMD_CS1_CS2
-+  "zectrix_note4", 12,   13,    11,  9,    10,  8,    0xff, 0xff, 0,     4,    0xff,    BATT_ADC,  EPD_42,
-+  "zectrix_note4c", 12,  13,    11,  9,    10,  8,    0xff, 0xff, 0,     4,    0xff,    BATT_ADC,  EPD_42_4CLR,
-   "m5_paper_mono", 0,    0,     0,   0,    0,   0,    47,   48,   2,     0xff, 0xff,    BATT_NONE, EPD_PAPER_MONO, 
-   "m5_paper_color", 0,   0,     0,   0,    0,   0,    3,    2,    1,     0xff, 0xff,    BATT_NONE, EPD_PAPER_COLOR, 
-   "reterminal_e1004", 0, 0,     0,   0,    0,   0,    0xff, 0xff, 4,     1,    21,      BATT_ADC,  EPD_133_COLOR,
-@@ -74,7 +80,7 @@ const TRMNL_DEVICE device_list[] =
+@@ -68,12 +72,14 @@ const TRMNL_DEVICE device_list[] =
+   "m5_paper_color", 0,   0,     0,   0,    0,   0,    3,    2,    1,     0xff, 0xff,    0xff,   BATT_NONE, EPD_PAPER_COLOR, 
+   "reterminal_e1004", 0, 0,     0,   0,    0,   0,    0xff, 0xff, 4,     1,    21,      12,     BATT_ADC,  EPD_133_COLOR,
+   "trmnl_steam",   7,    8,     6,   10,   5,   4,    21,   20,   2,     3,    0xff,    0xff,   BATT_ADC,  EPD_583,
++  "zectrix_note4", 12,   13,    11,  9,    10,  8,    0xff, 0xff, 0,     4,    0xff,    0xff,   BATT_ADC,  EPD_42,
++  "zectrix_note4c", 12,  13,    11,  9,    10,  8,    0xff, 0xff, 0,     4,    0xff,    0xff,   BATT_ADC,  EPD_42_4CLR,
+   NULL,            0,    0,     0,   0,    0,   0,    0,    0,    0,     0,    0,       0,      0,         0,
+ }; // device_list
  
  // TRMNL SPI ePaper panel types list. The list order is fixed and based on enumerated values
  // N.B. ALWAYS ADD NEW PANELS TO THE END OF THE LIST
@@ -481,19 +448,19 @@ index 02aa020..478c04b 100644
      {{EP75_800x480, EP75_800x480_4GRAY}, {EP75_800x480_GEN2, EP75_800x480_4GRAY_GEN2}, {EP75_800x480, EP75_800x480_4GRAY_V2}},
      {{EP426_800x480, EP426_800x480_4GRAY}, {EP426_800x480, EP426_800x480_4GRAY}, {EP426_800x480, EP426_800x480_4GRAY}},
      {{EP397_800x480, EP397_800x480_4GRAY}, {EP397_800x480, EP397_800x480_4GRAY}, {EP397_800x480, EP397_800x480_4GRAY}},
-@@ -88,6 +94,8 @@ const DISPLAY_PROFILE dpList[12][3] = { // 1-bit and 2-bit display types for eac
+@@ -86,6 +92,8 @@ const DISPLAY_PROFILE dpList[12][3] = { // 1-bit and 2-bit display types for eac
      {{EPD_M5_PAPER_COLOR, EPD_M5_PAPER_COLOR},{EPD_M5_PAPER_COLOR, EPD_M5_PAPER_COLOR},{EPD_M5_PAPER_COLOR, EPD_M5_PAPER_COLOR}},
      {{EPD_SEEED_E1004, EPD_SEEED_E1004},{EPD_SEEED_E1004, EPD_SEEED_E1004},{EPD_SEEED_E1004, EPD_SEEED_E1004}},
      {{EP368_792x528, EP368_792x528_4GRAY}, {EP368_792x528, EP368_792x528_4GRAY}, {EP368_792x528, EP368_792x528_4GRAY}},
 +    {{EP42B_400x300, EP42B_400x300}, {EP42B_400x300, EP42B_400x300}, {EP42B_400x300, EP42B_400x300}},
 +    {{EP42YR_400x300, EP42YR_400x300}, {EP42YR_400x300, EP42YR_400x300}, {EP42YR_400x300, EP42YR_400x300}},
- #endif
  };
  uint8_t u8SpectraPal[512]; // RGB333 mapped to closest Spectra6 color
-@@ -139,8 +147,185 @@ extern BQ27427 lipo; // Use lipo.[] to interact with the library in an Arduino
- static uint8_t *pDither;
+ #endif // !PARALLEL_EPD
+@@ -145,8 +153,185 @@ static void display_apply_light_sleep(uint8_t enabled)
+ #endif
+ }
  
- #ifdef BB_EPAPER
 +#ifdef BOARD_ZECTRIX_NOTE4C
 +namespace {
 +
@@ -673,18 +640,18 @@ index 02aa020..478c04b 100644
 +    bCanDoPartial = false;
 +    return result;
 +#else
-     if (writePlane) {
-         bbep.writePlane(plane);
-     }
-@@ -154,6 +339,7 @@ static bool display_update_epaper(int refreshMode, bool wait, bool writePlane =
+ #if defined(BOARD_SEEED_RETERMINAL_E1002) || defined(BOARD_SEEED_RETERMINAL_E1004)
+     // Light sleep with the WiFi radio running is unsupported
+     if (bLightSleepWanted && WiFi.getMode() != WIFI_MODE_NULL) {
+@@ -168,6 +353,7 @@ static bool display_update_epaper(int refreshMode, bool wait, bool writePlane =
      // The next update can be a partial update because the current is 1-bpp and stays in the EPD RAM
      bCanDoPartial = (bbep.getPanelType() == dpList[pDevice->panel_set][iTempProfile].OneBit);
      return true;
 +#endif // BOARD_ZECTRIX_NOTE4C
  }
  
- static void WriteSPIByte(uint8_t data)
-@@ -288,6 +474,9 @@ void display_init(void)
+ static void display_select_one_bit_panel(bool only_if_changed = false)
+@@ -326,6 +512,9 @@ void display_init(void)
          panel_rev_read = true;
          Log_info("Panel ID = 0x%08x\n", panel_rev);
      }
@@ -694,7 +661,7 @@ index 02aa020..478c04b 100644
      if (pDevice->epd_mosi_pin != 0 || pDevice->epd_sck_pin != 0) {
          bbep.setPanelType(dpList[pDevice->panel_set][iTempProfile].OneBit); // must be set BEFORE calling initio
          bbep.initIO(pDevice->epd_dc_pin, pDevice->epd_rst_pin, pDevice->epd_busy_pin, pDevice->epd_cs_pin,
-@@ -295,6 +484,7 @@ void display_init(void)
+@@ -333,6 +522,7 @@ void display_init(void)
      } else { // it's a pre-defined PCB+display in bb_epaper
          bbep.begin(dpList[pDevice->panel_set][0].OneBit);
      }
@@ -702,7 +669,7 @@ index 02aa020..478c04b 100644
  #else // Parallel eink devices
  #if defined (BOARD_SEEED_RETERMINAL_E1003)
      bbep.initIT8951(EPD_MOSI_PIN, EPD_MISO_PIN, EPD_SCK_PIN, EPD_CS_PIN, EPD_BUSY_PIN, EPD_RST_PIN, EPD_EN_PIN, EPD_VCC_EN);
-@@ -1110,7 +1300,7 @@ int png_draw_6clr(PNGDRAW *pDraw)
+@@ -1167,7 +1357,7 @@ int png_draw_6clr(PNGDRAW *pDraw)
      return 1; // continue decoding
  } /* png_draw_6clr() */
  
@@ -711,13 +678,13 @@ index 02aa020..478c04b 100644
  //
  // Draw the PNG image into the local framebuffer memory using the drawPixel() method
  // to do color translation and to properly format the memory layout
-@@ -1214,10 +1404,26 @@ int png_draw_4clr(PNGDRAW *pDraw)
+@@ -1276,6 +1466,21 @@ int png_draw_4clr(PNGDRAW *pDraw)
                  *d++ = uc;
              }
          } // for x
 +#ifdef BOARD_ZECTRIX_NOTE4C
-+    if ((pDraw->iWidth & 3) != 0) {
-+        uc <<= 2 * (4 - (pDraw->iWidth & 3));
++    if ((iWidth & 3) != 0) {
++        uc <<= 2 * (4 - (iWidth & 3));
 +        *d++ = uc;
 +    }
 +    if (pDraw->y >= 0 && pDraw->y < static_cast<int>(ZECTRIX_NOTE4C_ROWS)) {
@@ -725,12 +692,18 @@ index 02aa020..478c04b 100644
 +        if (framebuffer == nullptr) {
 +            return 0;
 +        }
-+        const size_t decoded_bytes = (pDraw->iWidth + 3) / 4;
++        const size_t decoded_bytes = (iWidth + 3) / 4;
 +        const size_t copy_bytes = std::min(decoded_bytes, ZECTRIX_NOTE4C_ROW_BYTES);
 +        memcpy(framebuffer + pDraw->y * ZECTRIX_NOTE4C_ROW_BYTES, pTemp, copy_bytes);
 +    }
 +#else
-     bbep.writeData(pTemp, (pDraw->iWidth+3)/4);
+     bbep.writeData(pTemp, (iWidth+3)/4);
+     if (iWidth < bbep.width()) {
+         // fill the unused area of the display with white
+@@ -1284,9 +1489,10 @@ int png_draw_4clr(PNGDRAW *pDraw)
+         memset(d, 0x55, x); // 0x55 = 4 pixels of white (01)
+         bbep.writeData(d, x);
+     }
 +#endif
      return 1; // continue decoding
  } /* png_draw4clr() */
@@ -739,7 +712,7 @@ index 02aa020..478c04b 100644
  
  int png_draw(PNGDRAW *pDraw)
  {
-@@ -1638,15 +1844,37 @@ PNG *png = new PNG();
+@@ -1708,10 +1914,31 @@ PNG *png = new PNG();
                  bbep.writePlane(); // send the pixels to the display panel
                  return REFRESH_FAST;
              }
@@ -771,6 +744,10 @@ index 02aa020..478c04b 100644
 +#else
              png->decode(NULL, 0);
              png->close();
+             if (png->getHeight() < bbep.height()) {
+@@ -1724,8 +1951,9 @@ PNG *png = new PNG();
+                 }
+             }
              delete(png); // free the decoder instance
 +#endif
              return REFRESH_FULL;
@@ -779,20 +756,14 @@ index 02aa020..478c04b 100644
              bbep.setAddrWindow(0, 0, bbep.width(), bbep.height());
              if (png->getBpp() == 1 || (png->getBpp() == 2 && png_count_colors(png, pPNG, iDataSize) == 2)) { // 1-bit image (single plane)
                  png->close(); // use a different PNGDraw callback for color matching
-@@ -1762,6 +1990,9 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait, bool b
+@@ -1841,12 +2069,19 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait, bool b
      }
  #endif
  #ifdef BB_EPAPER
 +#ifdef BOARD_ZECTRIX_NOTE4C
 +    zectrix_note4c_init_io();
 +#else
-     if (pDevice->epd_mosi_pin != 0 || pDevice->epd_sck_pin != 0) {
-         bbep.setPanelType(dpList[pDevice->panel_set][iTempProfile].OneBit);
-         bbep.initIO(pDevice->epd_dc_pin, pDevice->epd_rst_pin, pDevice->epd_busy_pin, pDevice->epd_cs_pin,
-@@ -1769,11 +2000,15 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait, bool b
-     } else {
-         bbep.begin(dpList[pDevice->panel_set][0].OneBit);
-     }
+     display_select_one_bit_panel();
 +#endif // BOARD_ZECTRIX_NOTE4C
  #endif // BB_EPAPER
      if (isPNG == true && data_size < MAX_IMAGE_SIZE)
@@ -805,17 +776,17 @@ index 02aa020..478c04b 100644
      }
      else if (MOTOSHORT(image_buffer) == 0xffd8) {
          Log_info("Drawing JPEG");
-@@ -1834,7 +2069,9 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait, bool b
+@@ -1894,7 +2129,9 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait, bool b
+ #endif // BB_EPAPER
          }
  #ifdef BB_EPAPER
- #ifndef BOARD_SEEED_RETERMINAL_E1002
 +#ifndef BOARD_ZECTRIX_NOTE4C
-         bbep.writePlane(); // send image data to the EPD
+         bbep.writePlane(); // send image data to the EPD (converting it if needed to 4/6-clr)
 +#endif
- #endif // !BOARD_SEEED_RETERMINAL_E1002
          iRefreshMode = REFRESH_PARTIAL;
  #endif // BB_EPAPER
-@@ -2587,6 +2824,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
+         iUpdateCount = 1; // use partial update
+@@ -2617,6 +2854,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
      {
          Log_info("Display set to white");
          bbep.fillScreen(BBEP_WHITE);
@@ -823,7 +794,7 @@ index 02aa020..478c04b 100644
  #ifdef BB_EPAPER
          if (!display_update_epaper(apiDisplayResult.response.maximum_compatibility ? REFRESH_FULL : REFRESH_FAST, true, true, PLANE_0)) {
              Log_error("display_show_msg: WiFi connect update failed");
-@@ -2597,6 +2835,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
+@@ -2627,6 +2865,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
          bbep.fullUpdate();
  #endif
          display_sleep(1000);
@@ -831,7 +802,7 @@ index 02aa020..478c04b 100644
      }
  
      auto width = display_width();
-@@ -2723,7 +2962,13 @@ void display_sleep(void)
+@@ -2753,7 +2992,13 @@ void display_sleep(void)
  {
      Log_info("Goto Sleep...");
  #ifdef BB_EPAPER
@@ -925,6 +896,55 @@ index e17ce9f..afc8e6e 100644
    Log_info("%s [%d]: update_firmware: %d\r\n", __FILE__, __LINE__, update_firmware);
    if (!update_firmware) return false;
  
+diff --git a/src/sleep_session.cpp b/src/sleep_session.cpp
+index 16dc17e..381d318 100644
+--- a/src/sleep_session.cpp
++++ b/src/sleep_session.cpp
+@@ -17,6 +17,10 @@
+ 
+ #include "driver/gpio.h"
+ 
++#ifdef BOARD_ZECTRIX
++#include <zectrix.h>
++#endif
++
+ #ifdef BOARD_TRMNL_X
+ #include <iqs323_task.h>
+ #include <touchbar_gesture.h>
+@@ -101,6 +105,9 @@ void goToSleep(void) {
+   gpio_hold_en(GPIO_NUM_13); // MOSFET enabling the battery power
+   gpio_deep_sleep_hold_en(); // Needed to keep the battery power enabled during RTC sleep
+ #endif
++#endif
++#ifdef BOARD_ZECTRIX
++  zectrix_prepare_deep_sleep();
+ #endif
+   esp_deep_sleep_start();
+ }
+@@ -142,6 +149,9 @@ void goToSleepButtonOnly(void) {
+ #ifdef BOARD_XTEINK_X4
+   gpio_hold_en(GPIO_NUM_13);
+   gpio_deep_sleep_hold_en();
++#endif
++#ifdef BOARD_ZECTRIX
++  zectrix_prepare_deep_sleep();
+ #endif
+   esp_deep_sleep_start();
+ }
+diff --git a/src/status_screens.cpp b/src/status_screens.cpp
+index 2f9b7e1..1de1eee 100644
+--- a/src/status_screens.cpp
++++ b/src/status_screens.cpp
+@@ -87,7 +87,9 @@ void showWakeLogo(void) {
+     showMessageWithLogo(NONE);
+   }
+ #else
++#ifndef BOARD_ZECTRIX_NOTE4C
+   display_show_image(storedLogoOrDefault(1), DEFAULT_IMAGE_SIZE, false, true);
++#endif
+ #endif // BOARD_TRMNL_X
+   // Force the display to show the current playlist image after the loading screen
+   // (even if it hasn't changed)
 diff --git a/src/zectrix.cpp b/src/zectrix.cpp
 new file mode 100644
 index 0000000..e21bd08

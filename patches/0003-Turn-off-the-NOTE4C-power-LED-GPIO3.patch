@@ -7,23 +7,9 @@ Subject: [PATCH 3/3] Turn off the NOTE4C power LED (GPIO3)
 The LED is active LOW and the zectrix port never drives GPIO3, so it stays lit.
 Drive it HIGH at boot and hold it HIGH during deep sleep.
 ---
- platformio.ini  | 2 +-
  src/zectrix.cpp | 5 +++++
- 2 files changed, 6 insertions(+), 1 deletion(-)
+ 1 file changed, 5 insertions(+)
 
-diff --git a/platformio.ini b/platformio.ini
-index 3cca275..a79d165 100644
---- a/platformio.ini
-+++ b/platformio.ini
-@@ -200,7 +200,7 @@ board = esp32s3_n16r8
- board_build.f_cpu = 240000000L
- board_build.f_flash = 80000000L
- board_build.flash_mode = dio
--board_build.partitions = trmnl_x_partitions.csv
-+board_build.partitions = boards/trmnl_x_partitions.csv
- board_build.cmake_extra_args = -DSDKCONFIG_DEFAULTS="sdkconfigs/sdkconfig.defaults;sdkconfigs/sdkconfig.defaults.zectrix"
- board_build.embed_txtfiles =
- 	managed_components/espressif__esp_insights/server_certs/https_server.crt
 diff --git a/src/zectrix.cpp b/src/zectrix.cpp
 index e21bd08..c4bd195 100644
 --- a/src/zectrix.cpp
