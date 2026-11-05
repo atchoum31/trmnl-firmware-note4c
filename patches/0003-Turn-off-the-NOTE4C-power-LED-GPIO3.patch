@@ -2,7 +2,7 @@ From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Cl=C3=A9ment=20Thersiquel?=
  <16476634+atchoum31@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 01:01:18 +0200
-Subject: [PATCH 3/5] Turn off the NOTE4C power LED (GPIO3)
+Subject: [PATCH 3/6] Turn off the NOTE4C power LED (GPIO3)
 
 The LED is active LOW and the zectrix port never drives GPIO3, so it stays lit.
 Drive it HIGH at boot and hold it HIGH during deep sleep.

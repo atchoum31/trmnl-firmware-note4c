@@ -36,6 +36,14 @@ file moved, put the Zectrix code in the new location. Keep every Zectrix block
 when you merge upstream changes, and keep the NOTE4C on the same draw path as
 `BOARD_TRMNL_4CLR`.
 
+## Frame buffer format
+
+`zectrix_note4c_update()` sends 100 bytes per row (2 bpp, `00` black, `01`
+white, `10` yellow, `11` red). When upstream draws in 1-bpp mode
+(`BB_MODE_1BPP`: message screens, G5 and BMP images), it expands each row
+first. Keep this conversion. Upstream message layouts assume an 800x480 panel:
+check that a new or moved message still fits 400x300.
+
 ## Charge LED
 
 `src/zectrix.cpp` loads a ULP-FSM program at boot. It runs every 500 ms, also

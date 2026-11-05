@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: atchoum31 <16476634+atchoum31@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 10:25:39 +0100
-Subject: [PATCH 5/5] Enable OTA on Zectrix boards with an image check
+Subject: [PATCH 5/6] Enable OTA on Zectrix boards with an image check
 
 OTA was off so that an official TRMNL image could not reach a Zectrix
 board. Turn it on, and pass the download through ZectrixImageCheck.
