@@ -23,7 +23,7 @@ working on the NOTE4C after every upstream change.
 | Charge complete | 1 | Active HIGH. HIGH when the battery is full on USB |
 | OK button | 0 | Active low. The only button the TRMNL firmware uses. Wakes from deep sleep |
 | UP button | 39 | Active low. Not an RTC GPIO, so it cannot wake from deep sleep |
-| DOWN / power button | 18 | Active low. Shares the power-button line |
+| DOWN / power button | 18 | Active low. Shares the power-button line. Armed as an ext1 wake source in `zectrix_prepare_deep_sleep()`: a press shows the next screen, like OK |
 
 The port puts its board code under `#if defined(BOARD_ZECTRIX)`,
 `BOARD_ZECTRIX_NOTE4` and `BOARD_ZECTRIX_NOTE4C` blocks, in `include/config.h`,

@@ -8,6 +8,11 @@ Supported device: Zectrix NOTE4C only. The NOTE4 is not supported by this base.
 
 Releases are not tested on hardware by the automation. Flash at your own risk.
 
+## Buttons
+
+- OK or the bottom side button: wake the device and show the next screen of the playlist. The playlist loops.
+- The top side button cannot wake the device from sleep (hardware limit), so it has no function.
+
 ## Power LED
 
 The power LED shows the charge state, also while the device sleeps:

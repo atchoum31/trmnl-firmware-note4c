@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: atchoum31 <16476634+atchoum31@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 10:57:10 +0100
-Subject: [PATCH 6/6] Fix NOTE4C message screens on v1.8.18
+Subject: [PATCH 6/7] Fix NOTE4C message screens on v1.8.18
 
 Since v1.8.18, upstream draws message screens, G5 and BMP images in a
 1-bpp buffer. The NOTE4C update always sent the buffer as 2 bpp, so the

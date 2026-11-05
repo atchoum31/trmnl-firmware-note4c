@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: atchoum31 <16476634+atchoum31@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 11:49:29 +0100
+Subject: [PATCH 7/7] Wake the NOTE4C with the DOWN button for the next screen
+
+The DOWN button (GPIO18, active LOW, RTC GPIO) is armed as an ext1
+deep-sleep wake source. A press wakes the board like a short OK press,
+so the device asks the server for the next screen. The button is armed
+only when it reads HIGH, so a line held LOW cannot cause a wake loop.
+
+The UP button (GPIO39) is not an RTC GPIO and cannot wake the board.
+---
+ src/zectrix.cpp | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/zectrix.cpp b/src/zectrix.cpp
+index 2ebd606..21c9218 100644
+--- a/src/zectrix.cpp
++++ b/src/zectrix.cpp
+@@ -13,6 +13,10 @@
+ namespace {
+ 
+ constexpr gpio_num_t ZECTRIX_POWER_LED_PIN = GPIO_NUM_3;
++// DOWN button (active LOW, RTC GPIO): wakes the board like a short OK press,
++// so the device shows the next screen. The UP button (GPIO39) is not an RTC
++// GPIO and cannot wake the board.
++constexpr gpio_num_t ZECTRIX_DOWN_BUTTON_PIN = GPIO_NUM_18;
+ constexpr gpio_num_t ZECTRIX_CHARGING_GPIO = static_cast<gpio_num_t>(ZECTRIX_CHARGING_PIN);
+ constexpr gpio_num_t ZECTRIX_CHARGED_GPIO = static_cast<gpio_num_t>(ZECTRIX_CHARGED_PIN);
+ 
+@@ -162,6 +166,16 @@ void zectrix_prepare_deep_sleep() {
+   // GPIO17 controls the board's battery power latch. Letting it fall LOW cuts
+   // power to the ESP32-S3 and prevents timer/button deep-sleep wake-up.
+   hold_rtc_output(static_cast<gpio_num_t>(VBAT_HOLD_PIN), HIGH);
++  // A line that is already LOW would wake the board at once, so arm the DOWN
++  // button only when it reads HIGH.
++  pinMode(static_cast<uint8_t>(ZECTRIX_DOWN_BUTTON_PIN), INPUT_PULLUP);
++  delay(1);
++  if (digitalRead(static_cast<uint8_t>(ZECTRIX_DOWN_BUTTON_PIN)) == HIGH) {
++    rtc_gpio_pullup_en(ZECTRIX_DOWN_BUTTON_PIN);
++    rtc_gpio_pulldown_dis(ZECTRIX_DOWN_BUTTON_PIN);
++    esp_sleep_enable_ext1_wakeup(1ULL << ZECTRIX_DOWN_BUTTON_PIN, ESP_EXT1_WAKEUP_ANY_LOW);
++  }
++
+   // RTC IO must stay powered so that the ULP keeps driving the power LED.
+   esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+   gpio_deep_sleep_hold_en();
