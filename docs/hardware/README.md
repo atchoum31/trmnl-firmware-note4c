@@ -18,7 +18,9 @@ working on the NOTE4C after every upstream change.
 | Function | GPIO | Notes |
 | --- | --- | --- |
 | Battery power latch | 17 | Must stay HIGH, also held in deep sleep, or the board loses power and cannot wake |
-| Power LED | 3 | Active LOW. The LED patch drives it HIGH at boot and holds it HIGH in deep sleep |
+| Power LED | 3 | Active LOW. Driven by the ULP charge-LED program, see below |
+| Charging status | 2 | Active LOW, open drain, needs the pull-up. LOW while the battery charges |
+| Charge complete | 1 | Active HIGH. HIGH when the battery is full on USB |
 | OK button | 0 | Active low. The only button the TRMNL firmware uses. Wakes from deep sleep |
 | UP button | 39 | Active low. Not an RTC GPIO, so it cannot wake from deep sleep |
 | DOWN / power button | 18 | Active low. Shares the power-button line |
@@ -33,6 +35,24 @@ releases (for example `src/power.cpp` became `src/power/power.cpp`). When a
 file moved, put the Zectrix code in the new location. Keep every Zectrix block
 when you merge upstream changes, and keep the NOTE4C on the same draw path as
 `BOARD_TRMNL_4CLR`.
+
+## Charge LED
+
+`src/zectrix.cpp` loads a ULP-FSM program at boot. It runs every 500 ms, also
+in deep sleep:
+
+- GPIO2 LOW (charging): the LED blinks.
+- GPIO1 HIGH (charge complete): the LED stays on.
+- Else (on battery): the LED stays off.
+
+Keep these rules when you merge upstream changes:
+
+- GPIO1, GPIO2 and GPIO3 stay in RTC mode. Do not call `pinMode`,
+  `digitalRead`, `digitalWrite` or `rtc_gpio_hold_en` on them. Read the charger
+  through `zectrix_is_charging()` and `zectrix_is_charged()`.
+- `zectrix_prepare_deep_sleep()` keeps `ESP_PD_DOMAIN_RTC_PERIPH` on.
+- `sdkconfigs/sdkconfig.defaults.zectrix` keeps the `CONFIG_ULP_COPROC_*`
+  lines.
 
 ## Build
 

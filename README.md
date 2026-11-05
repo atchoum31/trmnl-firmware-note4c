@@ -8,6 +8,14 @@ Supported device: Zectrix NOTE4C only. The NOTE4 is not supported by this base.
 
 Releases are not tested on hardware by the automation. Flash at your own risk.
 
+## Power LED
+
+The power LED shows the charge state, also while the device sleeps:
+
+- Blinks: the battery charges.
+- On: the battery is full and USB is connected.
+- Off: the device runs on battery.
+
 ## What is in this repository
 
 - `patches/`: a `git format-patch` series that adds the NOTE4C (PlatformIO env `zectrix_note4c`).

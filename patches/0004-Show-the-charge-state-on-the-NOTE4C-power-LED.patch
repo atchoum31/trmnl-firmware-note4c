@@ -1,0 +1,208 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: atchoum31 <16476634+atchoum31@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 09:58:14 +0100
+Subject: [PATCH 4/4] Show the charge state on the NOTE4C power LED
+
+A ULP-FSM program reads the charger status lines every 500 ms, also in
+deep sleep, and drives the power LED (GPIO3, active LOW):
+
+- GPIO2 LOW (charging): the LED blinks.
+- GPIO1 HIGH (charge complete): the LED stays on.
+- Else (on battery): the LED stays off.
+
+The three pins stay in RTC mode, so ZectrixPower reads the charger
+through zectrix_is_charging() and zectrix_is_charged(). The RTC
+peripherals stay powered in deep sleep for the ULP.
+---
+ include/zectrix.h                     |  4 ++
+ sdkconfigs/sdkconfig.defaults.zectrix |  5 ++
+ src/power/power.cpp                   | 16 ++---
+ src/zectrix.cpp                       | 90 +++++++++++++++++++++++++--
+ 4 files changed, 101 insertions(+), 14 deletions(-)
+
+diff --git a/include/zectrix.h b/include/zectrix.h
+index 1e70fb6..3d55021 100644
+--- a/include/zectrix.h
++++ b/include/zectrix.h
+@@ -10,4 +10,8 @@ void zectrix_power_init();
+ // deep sleep.
+ void zectrix_prepare_deep_sleep();
+ 
++// Charger status lines. Valid after zectrix_power_init().
++bool zectrix_is_charging();
++bool zectrix_is_charged();
++
+ #endif
+diff --git a/sdkconfigs/sdkconfig.defaults.zectrix b/sdkconfigs/sdkconfig.defaults.zectrix
+index 8704b39..02798cd 100644
+--- a/sdkconfigs/sdkconfig.defaults.zectrix
++++ b/sdkconfigs/sdkconfig.defaults.zectrix
+@@ -21,3 +21,8 @@ CONFIG_SPIRAM_BOOT_INIT=y
+ CONFIG_SPIRAM_USE_MALLOC=y
+ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
++
++# ULP coprocessor: drives the power LED from the charger status in deep sleep.
++CONFIG_ULP_COPROC_ENABLED=y
++CONFIG_ULP_COPROC_TYPE_FSM=y
++CONFIG_ULP_COPROC_RESERVE_MEM=1024
+diff --git a/src/power/power.cpp b/src/power/power.cpp
+index ca56849..8cda349 100644
+--- a/src/power/power.cpp
++++ b/src/power/power.cpp
+@@ -11,24 +11,20 @@ static TCA9535Power powerInstance(bbep, TCA9535_PG_PIN, TCA9535_STAT_PIN);
+ #elif defined(INCLUDE_GPIO_POWER)
+ static GPIOPower powerInstance(BQ25616_PG_PIN, BQ25616_STAT_PIN);
+ #elif defined(BOARD_ZECTRIX)
+-#include <Arduino.h>
++#include <zectrix.h>
+ 
+ /// @brief Reads the Zectrix charger's CHARGING (LOW = charging) and CHARGED
+-///        (HIGH = charge complete) status lines.
++///        (HIGH = charge complete) status lines. The pins stay in RTC mode for
++///        the charge LED, so they are read through zectrix.cpp.
+ class ZectrixPower : public BasePower {
+ public:
+   UsbStatus usbStatus() override {
+-    pinMode(ZECTRIX_CHARGING_PIN, INPUT_PULLUP);
+-    pinMode(ZECTRIX_CHARGED_PIN, INPUT);
+-    return (digitalRead(ZECTRIX_CHARGING_PIN) == LOW || digitalRead(ZECTRIX_CHARGED_PIN) == HIGH)
+-             ? UsbStatus::CONNECTED
+-             : UsbStatus::DISCONNECTED;
++    return (zectrix_is_charging() || zectrix_is_charged()) ? UsbStatus::CONNECTED
++                                                           : UsbStatus::DISCONNECTED;
+   }
+ 
+   ChargingStatus chargingStatus() override {
+-    pinMode(ZECTRIX_CHARGING_PIN, INPUT_PULLUP);
+-    return (digitalRead(ZECTRIX_CHARGING_PIN) == LOW) ? ChargingStatus::CHARGING
+-                                                      : ChargingStatus::NOT_CHARGING;
++    return zectrix_is_charging() ? ChargingStatus::CHARGING : ChargingStatus::NOT_CHARGING;
+   }
+ };
+ 
+diff --git a/src/zectrix.cpp b/src/zectrix.cpp
+index c4bd195..06072df 100644
+--- a/src/zectrix.cpp
++++ b/src/zectrix.cpp
+@@ -6,10 +6,55 @@
+ #include <config.h>
+ #include <driver/gpio.h>
+ #include <driver/rtc_io.h>
++#include <esp_sleep.h>
++#include <soc/rtc_io_reg.h>
++#include <ulp.h>
+ 
+ namespace {
+ 
+-  constexpr gpio_num_t ZECTRIX_POWER_LED_PIN = GPIO_NUM_3;
++constexpr gpio_num_t ZECTRIX_POWER_LED_PIN = GPIO_NUM_3;
++constexpr gpio_num_t ZECTRIX_CHARGING_GPIO = static_cast<gpio_num_t>(ZECTRIX_CHARGING_PIN);
++constexpr gpio_num_t ZECTRIX_CHARGED_GPIO = static_cast<gpio_num_t>(ZECTRIX_CHARGED_PIN);
++
++// The ULP program runs every 500 ms, also in deep sleep, and drives the power
++// LED from the charger status lines:
++//   charging (GPIO2 LOW)          -> LED blinks
++//   charge complete (GPIO1 HIGH)  -> LED on
++//   otherwise (on battery)        -> LED off
++// On the ESP32-S3, RTC GPIO n is RTC IO n for GPIO0..21.
++constexpr uint32_t ULP_PERIOD_US = 500000;
++constexpr uint32_t ULP_PHASE_WORD = 200; // blink phase, in RTC slow memory words
++constexpr uint32_t IN_CHARGING = RTC_GPIO_IN_NEXT_S + ZECTRIX_CHARGING_PIN;
++constexpr uint32_t IN_CHARGED = RTC_GPIO_IN_NEXT_S + ZECTRIX_CHARGED_PIN;
++constexpr uint32_t OUT_LED_SET = RTC_GPIO_OUT_DATA_W1TS_S + 3;
++constexpr uint32_t OUT_LED_CLR = RTC_GPIO_OUT_DATA_W1TC_S + 3;
++
++enum { L_OFF, L_ON, L_BLINK };
++
++const ulp_insn_t charge_led_program[] = {
++    I_RD_REG(RTC_GPIO_IN_REG, IN_CHARGING, IN_CHARGING),
++    M_BL(L_BLINK, 1),
++    I_RD_REG(RTC_GPIO_IN_REG, IN_CHARGED, IN_CHARGED),
++    M_BG(L_ON, 0),
++    M_LABEL(L_OFF),
++    I_WR_REG(RTC_GPIO_OUT_W1TS_REG, OUT_LED_SET, OUT_LED_SET, 1), // HIGH = off
++    I_HALT(),
++    M_LABEL(L_ON),
++    I_WR_REG(RTC_GPIO_OUT_W1TC_REG, OUT_LED_CLR, OUT_LED_CLR, 1), // LOW = on
++    I_HALT(),
++    M_LABEL(L_BLINK),
++    I_MOVI(R1, ULP_PHASE_WORD),
++    I_LD(R0, R1, 0),
++    I_ADDI(R0, R0, 1),
++    I_ANDI(R0, R0, 1),
++    I_ST(R0, R1, 0),
++    M_BG(L_ON, 0),
++    M_BX(L_OFF),
++};
++static_assert(sizeof(charge_led_program) / sizeof(ulp_insn_t) < ULP_PHASE_WORD,
++              "ULP program overlaps its data word");
++static_assert(ULP_PHASE_WORD * 4 < CONFIG_ULP_COPROC_RESERVE_MEM,
++              "ULP data word is outside the reserved RTC slow memory");
+ 
+ void configure_output(gpio_num_t pin, uint32_t level) {
+   rtc_gpio_hold_dis(pin);
+@@ -26,15 +71,51 @@ void hold_rtc_output(gpio_num_t pin, uint32_t level) {
+   rtc_gpio_hold_en(pin);
+ }
+ 
++void rtc_input(gpio_num_t pin, bool pullup) {
++  rtc_gpio_hold_dis(pin);
++  rtc_gpio_init(pin);
++  rtc_gpio_set_direction(pin, RTC_GPIO_MODE_INPUT_ONLY);
++  rtc_gpio_pulldown_dis(pin);
++  if (pullup) {
++    rtc_gpio_pullup_en(pin);
++  } else {
++    rtc_gpio_pullup_dis(pin);
++  }
++}
++
++// The charger pins and the LED stay in RTC mode, so the ULP can use them
++// while the main CPU runs and while it sleeps.
++void start_charge_led() {
++  ulp_timer_stop();
++  rtc_input(ZECTRIX_CHARGING_GPIO, true); // open drain, pulled up
++  rtc_input(ZECTRIX_CHARGED_GPIO, false);
++  rtc_gpio_hold_dis(ZECTRIX_POWER_LED_PIN);
++  rtc_gpio_init(ZECTRIX_POWER_LED_PIN);
++  rtc_gpio_set_direction(ZECTRIX_POWER_LED_PIN, RTC_GPIO_MODE_OUTPUT_ONLY);
++  rtc_gpio_set_level(ZECTRIX_POWER_LED_PIN, HIGH);
++  RTC_SLOW_MEM[ULP_PHASE_WORD] = 0;
++
++  size_t size = sizeof(charge_led_program) / sizeof(ulp_insn_t);
++  if (ulp_process_macros_and_load(0, charge_led_program, &size) != ESP_OK ||
++      ulp_set_wakeup_period(0, ULP_PERIOD_US) != ESP_OK || ulp_run(0) != ESP_OK) {
++    ulp_timer_stop();
++    rtc_gpio_set_level(ZECTRIX_POWER_LED_PIN, HIGH);
++  }
++}
++
+ } // namespace
+ 
++bool zectrix_is_charging() { return rtc_gpio_get_level(ZECTRIX_CHARGING_GPIO) == 0; }
++
++bool zectrix_is_charged() { return rtc_gpio_get_level(ZECTRIX_CHARGED_GPIO) != 0; }
++
+ void zectrix_power_init() {
+   gpio_deep_sleep_hold_dis();
+ 
+   configure_output(static_cast<gpio_num_t>(VBAT_HOLD_PIN), HIGH);
+   configure_output(static_cast<gpio_num_t>(EPD_POWER_PIN), HIGH);
+-  // Power LED (GPIO3, active LOW): keep it off, it is never driven otherwise and stays lit
+-  configure_output(ZECTRIX_POWER_LED_PIN, HIGH);
++  // Power LED (GPIO3, active LOW): the ULP shows the charge state on it.
++  start_charge_led();
+   delay(10);
+ }
+ 
+@@ -45,7 +126,8 @@ void zectrix_prepare_deep_sleep() {
+   // GPIO17 controls the board's battery power latch. Letting it fall LOW cuts
+   // power to the ESP32-S3 and prevents timer/button deep-sleep wake-up.
+   hold_rtc_output(static_cast<gpio_num_t>(VBAT_HOLD_PIN), HIGH);
+-  hold_rtc_output(ZECTRIX_POWER_LED_PIN, HIGH);
++  // RTC IO must stay powered so that the ULP keeps driving the power LED.
++  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+   gpio_deep_sleep_hold_en();
+ }
+ 
