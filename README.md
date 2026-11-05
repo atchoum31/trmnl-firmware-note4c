@@ -40,8 +40,8 @@ A release with automatic conflict resolution is marked as a pre-release. A relea
 
 Release assets:
 
-- `zectrix-note4c-<tag>-merged-firmware.bin`: complete flash image. Flash it at `0x0`.
-- `zectrix-note4c-<tag>-firmware.bin`: app image only. It sits at `0x20000` in the merged image. Do not flash it at `0x0`.
+- `zectrix-note4c-<tag>-merged-firmware.bin`: complete flash image for a first install. Flash it at `0x0`. It erases the Wi-Fi and server settings.
+- `zectrix-note4c-<tag>-firmware.bin`: app image for updates. It sits at `0x20000` in the merged image. It keeps the settings. Do not flash it at `0x0`.
 - `SHA256SUMS`
 
 ## How to flash
@@ -65,6 +65,21 @@ You need [esptool](https://github.com/espressif/esptool) and a USB cable. Use th
 5. Point the device at a TRMNL server. This can be trmnl.com or any BYOS (bring your own server) that implements the TRMNL device API.
 
 To go back, write your backup at `0x0` the same way.
+
+## How to update
+
+An update writes only the app image, so the Wi-Fi and server settings stay on the device.
+
+By OTA: a release whose notes say "OTA enabled" accepts OTA updates. Give your server the URL of `zectrix-note4c-<tag>-firmware.bin`. The device installs only an image built for the NOTE4C (it contains the string `TRMNL-ZECTRIX-IMAGE:zectrix_note4c`). It refuses any other image before it makes it bootable, for example an official TRMNL firmware.
+
+By USB: write the app image at `0x20000`, then erase `otadata` so that the device starts this image and not an older OTA copy.
+
+```sh
+esptool --chip esp32s3 --port PORT write-flash 0x20000 zectrix-note4c-<tag>-firmware.bin
+esptool --chip esp32s3 --port PORT erase-region 0x13000 0x2000
+```
+
+A device that runs an older release, without "OTA enabled" in its notes, has OTA disabled. Update it once by USB.
 
 ## Security model of the automation
 

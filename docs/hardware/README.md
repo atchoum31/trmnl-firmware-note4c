@@ -54,6 +54,16 @@ Keep these rules when you merge upstream changes:
 - `sdkconfigs/sdkconfig.defaults.zectrix` keeps the `CONFIG_ULP_COPROC_*`
   lines.
 
+## OTA
+
+OTA is on for the Zectrix targets. `src/services/firmware_update.cpp` passes
+the download through `ZectrixImageCheck` (`src/zectrix.cpp`) and calls
+`Update.abort()` when the image does not contain `ZECTRIX_IMAGE_ID`. Keep this
+check on every OTA download path when you merge upstream changes. Do not
+disable OTA, and do not change `ZECTRIX_IMAGE_ID`: devices in the field refuse
+an image without the exact ID. `build.sh assets` fails when the app image lacks
+the ID.
+
 ## Build
 
 - PlatformIO env `zectrix_note4c`.

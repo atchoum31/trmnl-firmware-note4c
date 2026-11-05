@@ -307,11 +307,13 @@ Unofficial community build of the TRMNL firmware for the Zectrix NOTE4C. Not aff
 
 $status
 
+OTA enabled: the device accepts an OTA update only from a NOTE4C image of this repository.
+
 Built from upstream tag \`$TAG\` (https://github.com/$UPSTREAM_REPO/releases/tag/$TAG) plus the patches in this repository at commit \`$sha\`. That commit is the corresponding source. License: GPL-3.0.
 
 Assets:
-- \`$merged\`: complete flash image (bootloader, partition table, app). Write it at 0x0. Back up the full 16 MB flash first.
-- \`$app\`: app image only. It sits at 0x20000 in the merged image. Do not write it at 0x0.
+- \`$merged\`: complete flash image (bootloader, partition table, app) for a first install. Write it at 0x0. Back up the full 16 MB flash first. It erases the Wi-Fi and server settings.
+- \`$app\`: app image for updates, by OTA or by USB at 0x20000. It keeps the settings. Do not write it at 0x0.
 - \`SHA256SUMS\`: checksums of both files.
 
 See the README for the flashing steps.
@@ -321,6 +323,8 @@ NOTES
 cmd_assets() {
   local b=$FW/.pio/build/$PIO_ENV
   [[ -f $b/firmware.bin && -f $b/merged_firmware.bin ]] || die "build outputs missing in $b"
+  # The release notes say "OTA enabled": keep that true.
+  grep -qa "TRMNL-ZECTRIX-IMAGE:zectrix_note4c" "$b/firmware.bin" || die "OTA image ID missing from the app image"
   mkdir -p "$DIST"
   local app=zectrix-note4c-$TAG-firmware.bin merged=zectrix-note4c-$TAG-merged-firmware.bin
   cp "$b/firmware.bin" "$DIST/$app"

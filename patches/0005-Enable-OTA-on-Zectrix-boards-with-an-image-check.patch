@@ -1,0 +1,187 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: atchoum31 <16476634+atchoum31@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 10:25:39 +0100
+Subject: [PATCH 5/5] Enable OTA on Zectrix boards with an image check
+
+OTA was off so that an official TRMNL image could not reach a Zectrix
+board. Turn it on, and pass the download through ZectrixImageCheck.
+Every image built for the board contains ZECTRIX_IMAGE_ID
+("TRMNL-ZECTRIX-IMAGE:<model>"). When the ID is missing, the update is
+aborted before the image becomes bootable.
+
+OTA writes only the app partition, so the settings stay on the device.
+---
+ docs/zectrix.md                  |  6 ++++--
+ include/zectrix.h                | 31 +++++++++++++++++++++++++++
+ platformio.ini                   |  1 -
+ src/services/firmware_update.cpp | 24 ++++++++++++++++-----
+ src/zectrix.cpp                  | 36 ++++++++++++++++++++++++++++++++
+ 5 files changed, 90 insertions(+), 8 deletions(-)
+
+diff --git a/docs/zectrix.md b/docs/zectrix.md
+index b1d9dad..a6fd54c 100644
+--- a/docs/zectrix.md
++++ b/docs/zectrix.md
+@@ -101,8 +101,10 @@ trying another driver.
+ 
+ ## Deliberate limitations
+ 
+-- Upstream TRMNL OTA is disabled for these targets. An official OG/X image
+-  could use incompatible pins and power behavior.
++- OTA accepts only an image built for the same Zectrix target. Such an image
++  contains the string `TRMNL-ZECTRIX-IMAGE:<model>`. An official OG/X image
++  uses other pins and power behavior, so the update is refused before it is
++  made bootable.
+ - Factory QA is disabled because its fixtures and pin assumptions are for
+   official TRMNL hardware.
+ - Only the Home / OK button is mapped into the current single-button TRMNL
+diff --git a/include/zectrix.h b/include/zectrix.h
+index 3d55021..1b2ae24 100644
+--- a/include/zectrix.h
++++ b/include/zectrix.h
+@@ -10,6 +10,37 @@ void zectrix_power_init();
+ // deep sleep.
+ void zectrix_prepare_deep_sleep();
+ 
++#include <Arduino.h>
++#include <config.h>
++
++// OTA image check. Every image built for this board contains
++// ZECTRIX_IMAGE_ID. ZectrixImageCheck passes an OTA stream through to
++// Update and tells if the image contained the ID, so an official TRMNL image
++// (other pins and power behavior) is never made bootable.
++#define ZECTRIX_IMAGE_ID "TRMNL-ZECTRIX-IMAGE:" DEVICE_MODEL
++
++class ZectrixImageCheck : public Stream {
++public:
++  explicit ZectrixImageCheck(Stream &source);
++
++  bool found() const { return _matched == _length; }
++
++  int available() override { return _source.available(); }
++  int peek() override { return _source.peek(); }
++  int read() override;
++  using Stream::readBytes;
++  size_t readBytes(char *buffer, size_t length) override;
++  size_t write(uint8_t) override { return 0; }
++
++private:
++  void scan(const uint8_t *data, size_t length);
++
++  Stream &_source;
++  size_t _length;
++  size_t _matched = 0;
++  uint8_t _fallback[64];
++};
++
+ // Charger status lines. Valid after zectrix_power_init().
+ bool zectrix_is_charging();
+ bool zectrix_is_charged();
+diff --git a/platformio.ini b/platformio.ini
+index 5712ac2..2b399bd 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -219,7 +219,6 @@ build_flags =
+ 	${env:esp32_base.build_flags}
+ 	-D BOARD_ZECTRIX
+ 	-D NO_QA
+-	-D DISABLE_OTA
+ 	-D PNG_MAX_BUFFERED_PIXELS=6432
+ 	-D ARDUINO_USB_MODE=1
+ 	-D ARDUINO_USB_CDC_ON_BOOT=1
+diff --git a/src/services/firmware_update.cpp b/src/services/firmware_update.cpp
+index afc8e6e..adfda59 100644
+--- a/src/services/firmware_update.cpp
++++ b/src/services/firmware_update.cpp
+@@ -9,6 +9,10 @@
+ 
+ #include "esp_ota_ops.h"
+ 
++#ifdef BOARD_ZECTRIX
++#include <zectrix.h>
++#endif
++
+ #ifdef BOARD_TRMNL_X
+ #include <WifiCaptive.h>
+ #include <globals.h>
+@@ -21,10 +25,6 @@ FirmwareUpdateService::FirmwareUpdateService(Persistence &persistence, Clock &cl
+       _firmwareUrl{0} {}
+ 
+ bool FirmwareUpdateService::isUpdateDue(bool update_firmware, const String &firmware_url) {
+-#ifdef DISABLE_OTA
+-  Log_info("%s [%d]: OTA is disabled for this build\r\n", __FILE__, __LINE__);
+-  return false;
+-#endif
+   Log_info("%s [%d]: update_firmware: %d\r\n", __FILE__, __LINE__, update_firmware);
+   if (!update_firmware) return false;
+ 
+@@ -129,7 +129,21 @@ bool FirmwareUpdateService::performFirmwareUpdate() {
+       if (Update.begin(contentLength)) {
+         Log_info("%s [%d]: Firmware update start\r\n", __FILE__, __LINE__);
+ 
+-        if (Update.writeStream(https->getStream())) {
++#ifdef BOARD_ZECTRIX
++        ZectrixImageCheck imageCheck(https->getStream());
++        Stream &source = imageCheck;
++#else
++        Stream &source = https->getStream();
++#endif
++        if (Update.writeStream(source)) {
++#ifdef BOARD_ZECTRIX
++          if (!imageCheck.found()) {
++            Update.abort();
++            Log_fatal("%s [%d]: Firmware is not a " DEVICE_MODEL " image, update refused\r\n", __FILE__, __LINE__);
++            _failureMessage = FW_UPDATE_FAILED;
++            return false;
++          }
++#endif
+           if (Update.end(true)) {
+             Log_info("%s [%d]: Firmware update successful. Rebooting...\r\n", __FILE__, __LINE__);
+             ota_ok = true;
+diff --git a/src/zectrix.cpp b/src/zectrix.cpp
+index 06072df..2ebd606 100644
+--- a/src/zectrix.cpp
++++ b/src/zectrix.cpp
+@@ -105,6 +105,42 @@ void start_charge_led() {
+ 
+ } // namespace
+ 
++ZectrixImageCheck::ZectrixImageCheck(Stream &source)
++    : _source(source), _length(strlen(ZECTRIX_IMAGE_ID)) {
++  static_assert(sizeof(ZECTRIX_IMAGE_ID) - 1 <= sizeof(_fallback), "image ID too long");
++  // KMP failure table, so a match that starts inside a partial match is found.
++  _fallback[0] = 0;
++  for (size_t i = 1, k = 0; i < _length; i++) {
++    while (k > 0 && ZECTRIX_IMAGE_ID[i] != ZECTRIX_IMAGE_ID[k]) k = _fallback[k - 1];
++    if (ZECTRIX_IMAGE_ID[i] == ZECTRIX_IMAGE_ID[k]) k++;
++    _fallback[i] = k;
++  }
++}
++
++void ZectrixImageCheck::scan(const uint8_t *data, size_t length) {
++  for (size_t i = 0; i < length && !found(); i++) {
++    while (_matched > 0 && data[i] != static_cast<uint8_t>(ZECTRIX_IMAGE_ID[_matched])) {
++      _matched = _fallback[_matched - 1];
++    }
++    if (data[i] == static_cast<uint8_t>(ZECTRIX_IMAGE_ID[_matched])) _matched++;
++  }
++}
++
++int ZectrixImageCheck::read() {
++  int c = _source.read();
++  if (c >= 0) {
++    uint8_t b = static_cast<uint8_t>(c);
++    scan(&b, 1);
++  }
++  return c;
++}
++
++size_t ZectrixImageCheck::readBytes(char *buffer, size_t length) {
++  size_t n = _source.readBytes(buffer, length);
++  scan(reinterpret_cast<const uint8_t *>(buffer), n);
++  return n;
++}
++
+ bool zectrix_is_charging() { return rtc_gpio_get_level(ZECTRIX_CHARGING_GPIO) == 0; }
+ 
+ bool zectrix_is_charged() { return rtc_gpio_get_level(ZECTRIX_CHARGED_GPIO) != 0; }

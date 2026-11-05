@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: atchoum31 <16476634+atchoum31@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 09:58:14 +0100
-Subject: [PATCH 4/4] Show the charge state on the NOTE4C power LED
+Subject: [PATCH 4/5] Show the charge state on the NOTE4C power LED
 
 A ULP-FSM program reads the charger status lines every 500 ms, also in
 deep sleep, and drives the power LED (GPIO3, active LOW):
