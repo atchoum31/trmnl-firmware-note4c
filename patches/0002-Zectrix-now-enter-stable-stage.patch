@@ -9,7 +9,7 @@ Subject: [PATCH 2/7] Zectrix now enter stable stage
  2 files changed, 12 insertions(+), 17 deletions(-)
 
 diff --git a/README.md b/README.md
-index 388c745..9bceaeb 100644
+index 3e9e318..fff4f36 100644
 --- a/README.md
 +++ b/README.md
 @@ -8,7 +8,7 @@ created for the [TRMNL](https://trmnl.com) e-ink display.
@@ -20,7 +20,7 @@ index 388c745..9bceaeb 100644
 +Zectrix Note 4 / Note 4C build and flashing notes are available in
  [docs/zectrix.md](docs/zectrix.md).
  
- ## **Algorithm block scheme**
+ ## **Wake cycle**
 diff --git a/docs/zectrix.md b/docs/zectrix.md
 index 7aec7fc..b1d9dad 100644
 --- a/docs/zectrix.md

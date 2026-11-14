@@ -47,10 +47,10 @@ index 8704b39..02798cd 100644
 +CONFIG_ULP_COPROC_TYPE_FSM=y
 +CONFIG_ULP_COPROC_RESERVE_MEM=1024
 diff --git a/src/power/power.cpp b/src/power/power.cpp
-index ca56849..8cda349 100644
+index 7eb2876..a2e3110 100644
 --- a/src/power/power.cpp
 +++ b/src/power/power.cpp
-@@ -11,24 +11,20 @@ static TCA9535Power powerInstance(bbep, TCA9535_PG_PIN, TCA9535_STAT_PIN);
+@@ -10,24 +10,20 @@ static TCA9535Power powerInstance(bbep, TCA9535_PG_PIN, TCA9535_STAT_PIN);
  #elif defined(INCLUDE_GPIO_POWER)
  static GPIOPower powerInstance(BQ25616_PG_PIN, BQ25616_STAT_PIN);
  #elif defined(BOARD_ZECTRIX)

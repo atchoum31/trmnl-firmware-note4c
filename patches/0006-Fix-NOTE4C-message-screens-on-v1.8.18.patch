@@ -15,14 +15,15 @@ panel showed two half-width copies on red and noise below.
   two lines left of the QR code, and the instructions move above the
   bottom edge (upstream draws them at y >= 386).
 ---
- src/display.cpp | 74 +++++++++++++++++++++++++++++++++++++++++++++++--
- 1 file changed, 71 insertions(+), 3 deletions(-)
+ src/display.cpp         | 37 ++++++++++++++++++++++++++++++++++---
+ src/message_screens.cpp | 33 +++++++++++++++++++++++++++++++++
+ 2 files changed, 67 insertions(+), 3 deletions(-)
 
 diff --git a/src/display.cpp b/src/display.cpp
-index 4cdb0f2..f2c7747 100644
+index 750f627..6ef0082 100644
 --- a/src/display.cpp
 +++ b/src/display.cpp
-@@ -197,6 +197,24 @@ bool zectrix_note4c_wait_idle(const char *stage, uint32_t timeout_ms)
+@@ -120,6 +120,24 @@ bool zectrix_note4c_wait_idle(const char *stage, uint32_t timeout_ms)
      return true;
  }
  
@@ -47,7 +48,7 @@ index 4cdb0f2..f2c7747 100644
  bool zectrix_note4c_update()
  {
      auto *buffer = static_cast<uint8_t *>(bbep.getBuffer());
-@@ -204,9 +222,11 @@ bool zectrix_note4c_update()
+@@ -127,9 +145,11 @@ bool zectrix_note4c_update()
          Log_error("EPD update failed: framebuffer is not allocated");
          return false;
      }
@@ -60,7 +61,7 @@ index 4cdb0f2..f2c7747 100644
          uint32_t frame_hash = 2166136261u;
          uint32_t color_counts[4] = {};
          for (size_t index = 0; index < ZECTRIX_NOTE4C_ROW_BYTES * ZECTRIX_NOTE4C_ROWS; ++index) {
-@@ -250,8 +270,13 @@ bool zectrix_note4c_update()
+@@ -173,8 +193,13 @@ bool zectrix_note4c_update()
          return false;
      }
      for (size_t row = 0; row < ZECTRIX_NOTE4C_ROWS; ++row) {
@@ -76,94 +77,95 @@ index 4cdb0f2..f2c7747 100644
          if ((row % 16) == 15) {
              delay(1);
          }
-@@ -358,6 +383,11 @@ static bool display_update_epaper(int refreshMode, bool wait, bool writePlane =
+@@ -279,6 +304,11 @@ bool display_update_epaper(int refreshMode, bool wait, bool writePlane, uint8_t
+ }
  
- static void display_select_one_bit_panel(bool only_if_changed = false)
- {
+ static void display_select_one_bit_panel(bool only_if_changed = false) {
 +#ifdef BOARD_ZECTRIX_NOTE4C
-+    // The NOTE4C panel is driven by zectrix_note4c_update() on its own SPI host.
-+    (void)only_if_changed;
-+    zectrix_note4c_init_io();
++  // The NOTE4C panel is driven by zectrix_note4c_update() on its own SPI host.
++  (void)only_if_changed;
++  zectrix_note4c_init_io();
 +#else
-     bool custom_pins = pDevice->epd_mosi_pin != 0 || pDevice->epd_sck_pin != 0;
-     int one_bit = dpList[pDevice->panel_set][custom_pins ? iTempProfile : 0].OneBit;
-     if (only_if_changed && bbep.getPanelType() == one_bit) {
-@@ -370,8 +400,21 @@ static void display_select_one_bit_panel(bool only_if_changed = false)
-     } else {
-         bbep.begin(one_bit);
-     }
+   bool custom_pins = pDevice->epd_mosi_pin != 0 || pDevice->epd_sck_pin != 0;
+   int one_bit = dpList[pDevice->panel_set][custom_pins ? iTempProfile : 0].OneBit;
+   if (only_if_changed && bbep.getPanelType() == one_bit) {
+@@ -291,6 +321,7 @@ static void display_select_one_bit_panel(bool only_if_changed = false) {
+   } else {
+     bbep.begin(one_bit);
+   }
 +#endif
+ }
+ 
+ // Message screens are 1-bit
+diff --git a/src/message_screens.cpp b/src/message_screens.cpp
+index 1257251..27ed8ee 100644
+--- a/src/message_screens.cpp
++++ b/src/message_screens.cpp
+@@ -20,6 +20,17 @@ template <typename T> static void draw_centered_line(const T &text, int y) {
+   bbep.println(text);
  }
  
 +#ifdef BOARD_ZECTRIX_NOTE4C
 +// The 400-pixel panel has no room for "TRMNL firmware <version>" on one line
 +// beside the 66x66 QR code at x = width - 40 - 66. Use two lines.
-+static void display_print_version_left_of_qr(const String &version)
-+{
-+    bbep.setCursor(16, 48);
-+    bbep.println("TRMNL firmware");
-+    bbep.setCursor(16, -1);
-+    bbep.println(version);
++static void display_print_version_left_of_qr(const String &version) {
++  bbep.setCursor(16, 48);
++  bbep.println("TRMNL firmware");
++  bbep.setCursor(16, -1);
++  bbep.println(version);
 +}
 +#endif
 +
- // Message screens are 1-bit
- static void display_prepare_message(void)
- {
-@@ -2376,6 +2419,9 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, const char *messa
-     break;
-     case WIFI_FAILED:
-     {
-+#ifdef BOARD_ZECTRIX_NOTE4C
-+        display_print_version_left_of_qr(Messages::firmware_version());
-+#else
-         String string0 = "TRMNL firmware ";
-         string0 += Messages::firmware_version();
- #ifdef __BB_EPAPER__
-@@ -2384,6 +2430,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, const char *messa
-         bbep.setCursor(80, 104); // place in upper left corner
- #endif
-         bbep.println(string0);
-+#endif
-         const char string1[] = "Can't establish WiFi connection. Will keep trying.";
-         bbep.getStringBox(string1, &rect);
-         bbep.setCursor((bbep.width() - rect.w)/2, bbep.height() - (rect.h*2)-140);
-@@ -2930,10 +2977,30 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
-     {
-         Log_info("wifi connect case");
+ static void draw_otg_turned_on_message(void) {
+   const char string1[] = "OTG turned on!";
+   draw_centered_line(string1, 430);
+@@ -72,6 +83,9 @@ static void draw_wifi_connect_message(void) {
+ static void draw_wifi_failed_message(void) {
+   BB_RECT rect;
  
 +#ifdef BOARD_ZECTRIX_NOTE4C
-+        display_print_version_left_of_qr(fw_version);
++  display_print_version_left_of_qr(Messages::firmware_version());
 +#else
-         String string1 = "TRMNL firmware ";
-         string1 += fw_version;
-         bbep.setCursor(40, 48); // place in upper left corner
-         bbep.println(string1);
+   String string0 = "TRMNL firmware ";
+   string0 += Messages::firmware_version();
+ #ifdef __BB_EPAPER__
+@@ -80,6 +94,7 @@ static void draw_wifi_failed_message(void) {
+   bbep.setCursor(80, 104); // place in upper left corner
+ #endif
+   bbep.println(string0);
 +#endif
+   const char string1[] = "Can't connect to Wi-Fi. Will keep trying.";
+   bbep.getStringBox(string1, &rect);
+   bbep.setCursor((bbep.width() - rect.w) / 2, bbep.height() - (rect.h * 2) - 140);
+@@ -647,6 +662,23 @@ static void draw_wifi_connect_setup_message(const char *fw_version, String messa
+ 
+   Log_info("wifi connect case");
+ 
 +#ifdef BOARD_ZECTRIX_NOTE4C
-+        // Upstream places these lines at y >= 386, below the 300-pixel panel.
-+        {
-+            String lines[3] = {"Connect your phone or computer to", "", "or scan the QR code for help"};
-+            lines[1] = (message.length() > 0) ? "\"" + message + "\" Wi-Fi" : String("the TRMNL Wi-Fi");
-+            bbep.getStringBox(lines[0], &rect);
-+            const int line_h = rect.h + 6;
-+            int y = bbep.height() - 3 * line_h - 4;
-+            for (const String &line : lines) {
-+                bbep.getStringBox(line, &rect);
-+                bbep.setCursor((bbep.width() - rect.w) / 2, y);
-+                bbep.print(line);
-+                y += line_h;
-+            }
-+        }
++  display_print_version_left_of_qr(fw_version);
++  // Upstream places these lines at y >= 386, below the 300-pixel panel.
++  {
++    String lines[3] = {"Connect your phone or computer to", "", "or scan the QR code for help"};
++    lines[1] = (message.length() > 0) ? "\"" + message + "\" Wi-Fi" : String("the TRMNL Wi-Fi");
++    bbep.getStringBox(lines[0], &rect);
++    const int line_h = rect.h + 6;
++    int y = bbep.height() - 3 * line_h - 4;
++    for (const String &line : lines) {
++      bbep.getStringBox(line, &rect);
++      bbep.setCursor((bbep.width() - rect.w) / 2, y);
++      bbep.print(line);
++      y += line_h;
++    }
++  }
 +#else
-         String string2 = "Connect your phone or computer to ";
-         string2 += (message.length() > 0) ? "\"" + message + "\"" : String("the TRMNL");
-         string2 += " Wi-Fi";
-@@ -2948,6 +3015,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
-         bbep.getStringBox(string3, &rect);
-         bbep.setCursor((bbep.width() - rect.w) / 2, -1);
-         bbep.print(string3);
+   String string1 = "TRMNL firmware ";
+   string1 += fw_version;
+   bbep.setCursor(40, 48); // place in upper left corner
+@@ -663,6 +695,7 @@ static void draw_wifi_connect_setup_message(const char *fw_version, String messa
+   bbep.println(string2);
+   const char string3[] = "or scan the QR code for help";
+   draw_centered_line(string3, -1);
 +#endif // BOARD_ZECTRIX_NOTE4C
  #ifdef __BB_EPAPER__
-         bbep.loadG5Image(wifi_connect_qr, bbep.width() - 40 - 66, 40, BBEP_WHITE, BBEP_BLACK); // 66x66 QR code
+   bbep.loadG5Image(wifi_connect_qr, bbep.width() - 40 - 66, 40, BBEP_WHITE, BBEP_BLACK); // 66x66 QR code
  #else // bigger for X

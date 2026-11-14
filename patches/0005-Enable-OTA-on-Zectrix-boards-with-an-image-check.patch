@@ -78,7 +78,7 @@ index 3d55021..1b2ae24 100644
  bool zectrix_is_charging();
  bool zectrix_is_charged();
 diff --git a/platformio.ini b/platformio.ini
-index 5712ac2..2b399bd 100644
+index f1605b6..56e0895 100644
 --- a/platformio.ini
 +++ b/platformio.ini
 @@ -219,7 +219,6 @@ build_flags =

@@ -10,9 +10,23 @@ only when it reads HIGH, so a line held LOW cannot cause a wake loop.
 
 The UP button (GPIO39) is not an RTC GPIO and cannot wake the board.
 ---
+ src/display.cpp |  2 +-
  src/zectrix.cpp | 14 ++++++++++++++
- 1 file changed, 14 insertions(+)
+ 2 files changed, 15 insertions(+), 1 deletion(-)
 
+diff --git a/src/display.cpp b/src/display.cpp
+index 6ef0082..ff3d94a 100644
+--- a/src/display.cpp
++++ b/src/display.cpp
+@@ -145,7 +145,7 @@ bool zectrix_note4c_update()
+         Log_error("EPD update failed: framebuffer is not allocated");
+         return false;
+     }
+-    const bool one_bit = bbep._bbep.mode == BB_MODE_1BPP;
++    const bool one_bit = bbep._bbep.mode == BBEP_MODE_1BPP;
+     uint8_t expanded_row[ZECTRIX_NOTE4C_ROW_BYTES];
+ 
+ #ifdef DEV_FIRMWARE
 diff --git a/src/zectrix.cpp b/src/zectrix.cpp
 index 2ebd606..21c9218 100644
 --- a/src/zectrix.cpp
